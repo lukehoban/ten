@@ -27,7 +27,7 @@ class ParserTestCase(unittest.TestCase):
     def test_tokens_full(self):
         str = """
             CausalSelfAttention[Embed, Heads, dropout](x : {B T Embed}) -> {B T Embed}:
-            q,k,v = Linear[Embed, Embed*3](x) {B T (3 Heads K) -> 3 B Heads T K}
+            let q,k,v = Linear[Embed, Embed*3](x) {B T (3 Heads K) -> 3 B Heads T K}
         """
         parser = parse.Parser(str)
         while True:
@@ -38,7 +38,8 @@ class ParserTestCase(unittest.TestCase):
     def test_parse_csa(self):
         str = """
         CausalSelfAttention[Embed, Heads, dropout](x : {B T Embed}) -> {B T Embed}: 
-            q,k,v = Linear[Embed, Embed*3](x) {B T (3 Heads K) -> 3 B Heads T K}
+            let q,k,v = Linear[Embed, Embed*3](x) {B T (3 Heads K) -> 3 B Heads T K}
+            return q
         """
         parser = parse.Parser(str)
         funcs = parser.parse()

@@ -45,13 +45,36 @@ CausalSelfAttention[Embed, Heads, dropout=0.1](x : {B T Embed}) -> {B T Embed}:
 
 
 CausalSelfAttention[Embed, Heads, dropout](x : {B T Embed}) -> {B T Embed}:
-    q,k,v = Linear[Embed, Embed*3](x) {B T (3 Heads K) -> 3 B Heads T K}
-    att = @{BHIJ}(q{BHIK}, k{BHJK}) / Sqrt(Embed/Heads)
-    mask = [i,j => i<=j] {IJ->11IJ}
-    masked = att[mask ?? -Inf]
-    averaged = Dropout[dropout](Softmax[K](masked{BHIK}))
-    y = @{BT(HK)}(att{BHTJ}, v{BHJK})
-    Dropout["resid_dropout", dropout](Linear["proj", Embed, Embed](y))
+    let q,k,v = Linear[Embed, Embed*3](x) {B T (3 Heads K) -> 3 B Heads T K}
+    let att = @{BHIJ}(q{BHIK}, k{BHJK}) / Sqrt(Embed/Heads)
+    let mask = [i,j => i<=j] {IJ->11IJ}
+    let masked = att[mask ?? -Inf]
+    let averaged = Dropout[dropout](Softmax[K](masked{BHIK}))
+    let y = @{BT(HK)}(att{BHTJ}, v{BHJK})
+    return Dropout["resid_dropout", dropout](Linear["proj", Embed, Embed](y))
+
+# Can we assume we can always batch?  So that we can author based on {} -> {} and assume we'll get {...} -> {...} for free?
+# Can we declare 
+
+Gelu(x: {...}) -> {...}:
+    return 0.5 * x * (1 + Tanh(0.7978845608 * x + 0.044715 * x**3))
+
+SoftMax[N](x: {...N}) -> {...N}:
+    let exp_x = Exp(x - Max[N](x{...N}))
+    return exp_x / Sum[N](x{...N})
+
+LayerNorm[S,E]|g:{E},b:{E}|(x: {S,E}) -> {S,E}:
+    let mean = Mean[E](x{S,E})
+    let variance = Var[E](x{S,E})
+    return g * (x - mean) / Sqrt(variance + 1e-5) + b
+
+Linear[N,K]|w:{N,K},b:{K}|(x: {...N}) -> {...K}:
+    return @{...K}(x{...N}, w{N,K}) + b
+
+FFN[S,E]|c_fc, c_proj|(x:{S,E}) -> {S,E}:
+    let a = Gelu(Linear[E,E*4]|c_fc...|(x))
+    return Linear[E*4,E]|c_proj...|(a)
+
 
 
 
