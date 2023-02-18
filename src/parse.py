@@ -3,7 +3,7 @@ import onnx
 from onnx import helper, shape_inference
 import onnxruntime as ort
 from dataclasses import dataclass
-from typing import List, Optional, Union, Tuple, Mapping
+from typing import Sequence, Optional, Union, Tuple, Dict, Callable
 import numpy as np
 
 
@@ -15,7 +15,14 @@ class Token:
     indentation_level: int
 
 
-Expr = Union["CallExpr", "ReshapeExpr", "BinaryExpr", "MatMulExpr"]
+Expr = Union[
+    "FloatExpr", "VariableExpr", "CallExpr", "ReshapeExpr", "BinaryExpr", "MatMulExpr"
+]
+
+
+@dataclass
+class FloatExpr:
+    value: float
 
 
 @dataclass
@@ -26,8 +33,8 @@ class VariableExpr:
 @dataclass
 class CallExpr:
     f: Expr
-    static_args: List[Token]
-    args: List[Expr]
+    static_args: Sequence[Expr]
+    args: Sequence[Expr]
 
 
 @dataclass
@@ -39,7 +46,9 @@ class ReshapeExpr:
 
 @dataclass
 class BinaryExpr:
-    pass
+    op: Token
+    left: Expr
+    right: Expr
 
 
 @dataclass
@@ -47,34 +56,47 @@ class MatMulExpr:
     pass
 
 
+Statement = Union["LetStatement", "ReturnStatement"]
+
+
 @dataclass
-class Statement:
-    variables: List[Token]
+class LetStatement:
+    variables: Sequence[Token]
+    expr: Expr
+
+
+@dataclass
+class ReturnStatement:
     expr: Expr
 
 
 @dataclass
 class TensorType:
-    dims: List[Token]
+    dims: Sequence[Token]
 
 
 @dataclass
-class Function:
+class FunctionDeclaration:
     name: Token
-    static_args: List[Token]
-    args: List[Tuple[Token, TensorType]]
+    static_args: Sequence[Token]
+    args: Sequence[Tuple[Token, TensorType]]
     ret: TensorType
-    body: List[Statement]
+    body: Sequence[Statement]
 
 
-Value = Union[float, np.ndarray]
+Value = Union[float, np.ndarray, "Func", Sequence["Value"]]
+
+
+@dataclass
+class Func:
+    decl: Union[FunctionDeclaration, Callable[..., Callable[..., Value]]]
 
 
 @dataclass
 class Env:
     parent: Optional["Env"]
-    static_vars: Mapping[str, Value]
-    vars: Mapping[str, Value]
+    static_vars: Dict[str, Value]
+    vars: Dict[str, Value]
 
     def lookup(self, name: str) -> Optional[Value]:
         ret = self.static_vars.get(name)
@@ -97,16 +119,91 @@ class Env:
 
 
 class Interpreter:
-    def eval_call(self, program: Function, static_args: List[float], args: List[float]):
-        static_vars: Mapping[str, Value] = {}
+    def eval_call_expr(
+        self,
+        program: FunctionDeclaration,
+        static_args: list[Value],
+        args: list[Value],
+        env: Env,
+    ) -> Value:
+        static_vars: Dict[str, Value] = {}
         for [var, val] in zip(program.static_args, static_args):
             static_vars[var.text] = val
-        vars: Mapping[str, Value] = {}
+        vars: Dict[str, Value] = {}
         for [(var, typ), val] in zip(program.args, args):
-            # TODO: check type
+            # TODO: type check
             vars[var.text] = val
-        env = Env(None, static_vars, vars)
-        pass
+        env = Env(env, static_vars, vars)
+        for stmt in program.body:
+            res = self.eval_stmt(stmt, env)
+            if res != None:
+                return res
+        raise RuntimeError("No return statement in function.")
+
+    def eval_stmt(self, stmt: Statement, env: Env) -> Optional[Value]:
+        if isinstance(stmt, LetStatement):
+            result = self.eval_expr(stmt.expr, env)
+            if isinstance(result, list):
+                for (var, val) in zip(stmt.variables, result):
+                    env.vars[var.text] = val
+            elif len(stmt.variables) == 1:
+                env.vars[stmt.variables[0].text] = result
+            else:
+                raise RuntimeError("Too many variables for single value.")
+            return None
+        if isinstance(stmt, ReturnStatement):
+            return self.eval_expr(stmt.expr, env)
+        raise NotImplementedError("Unknown statement type.")
+
+    def eval_expr(self, expr: Expr, env: Env) -> Value:
+        if isinstance(expr, FloatExpr):
+            return expr.value
+        elif isinstance(expr, CallExpr):
+            f = self.eval_expr(expr.f, env)
+            if not isinstance(f, Func):
+                raise RuntimeError("Cannot call non-function.")
+            static_args = [self.eval_expr(arg, env) for arg in expr.static_args]
+            args = [self.eval_expr(arg, env) for arg in expr.args]
+            print(static_args)
+            print(args)
+            if isinstance(f.decl, Callable):
+                a = f.decl(*static_args)
+                print(a)
+                b = a(*args)
+                print(b)
+                return b
+            else:
+                return self.eval_call_expr(f.decl, static_args, args, env)
+        elif isinstance(expr, ReshapeExpr):
+            raise NotImplementedError("ReshapeExpr not implemented yet.")
+        elif isinstance(expr, BinaryExpr):
+            left = self.eval_expr(expr.left, env)
+            right = self.eval_expr(expr.right, env)
+            if not isinstance(left, float) and not isinstance(left, np.ndarray):
+                raise RuntimeError("Cannot +/*/** non-tensors.")
+            if not isinstance(right, float) and not isinstance(right, np.ndarray):
+                raise RuntimeError("Cannot add non-tensors.")
+            if expr.op.text == "+":
+                return left + right
+            if expr.op.text == "-":
+                return left - right
+            if expr.op.text == "*":
+                return left * right
+            if expr.op.text == "/":
+                return left / right
+            if expr.op.text == "**":
+                return left**right
+            else:
+                raise RuntimeError(f"Unknown binary operator: {expr.op.text}")
+        elif isinstance(expr, MatMulExpr):
+            raise NotImplementedError("MatMulExpr not implemented yet.")
+        elif isinstance(expr, VariableExpr):
+            val = env.lookup(expr.name.text)
+            if val == None:
+                raise RuntimeError(f"Variable {expr.name.text} not found.")
+            return val
+        else:
+            raise NotImplementedError("Unknown expression type.")
 
 
 class Parser:
@@ -211,7 +308,7 @@ class Parser:
             self.peeked_token = self.read_token()
         return self.peeked_token
 
-    def parse(self) -> List[Function]:
+    def parse(self) -> Sequence[FunctionDeclaration]:
         tok = self.peek_token()
         if tok is None:
             raise Exception("Expected IDENT found: EOF")
@@ -219,7 +316,7 @@ class Parser:
             raise Exception("Expected IDENT found: " + tok.kind)
         return self.parse_program()
 
-    def parse_program(self) -> List[Function]:
+    def parse_program(self) -> Sequence[FunctionDeclaration]:
         functions = []
         while True:
             tok = self.peek_token()
@@ -228,7 +325,7 @@ class Parser:
             functions.append(self.parse_function())
         return functions
 
-    def parse_function(self) -> Function:
+    def parse_function(self) -> FunctionDeclaration:
         name = self.read_token()
         tok = self.read_token()
         static_args = []
@@ -267,7 +364,7 @@ class Parser:
         ):
             statements.append(self.parse_statement())
             next_tok = self.peek_token()
-        return Function(name, static_args, args, ret, statements)
+        return FunctionDeclaration(name, static_args, args, ret, statements)
 
     def parse_statement(self) -> Statement:
         next_tok = self.read_token()
@@ -288,7 +385,7 @@ class Parser:
                 else:
                     raise Exception("Expected = or , found: ", next_tok)
             rhs = self.parse_expression()
-            return Statement(lhs, rhs)
+            return LetStatement(lhs, rhs)
         else:
             raise Exception("NYI - STATEMENT")
         # elif next_tok.text == "[" or next_tok.text == "(":
