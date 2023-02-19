@@ -100,10 +100,10 @@ class Env:
 
     def lookup(self, name: str) -> Optional[Value]:
         ret = self.static_vars.get(name)
-        if ret != None:
+        if ret is not None:
             return ret
         ret = self.vars.get(name)
-        if ret != None:
+        if ret is not None:
             return ret
         if self.parent != None:
             return self.parent.lookup(name)
@@ -136,7 +136,7 @@ class Interpreter:
         env = Env(env, static_vars, vars)
         for stmt in program.body:
             res = self.eval_stmt(stmt, env)
-            if res != None:
+            if res is not None:
                 return res
         raise RuntimeError("No return statement in function.")
 
@@ -164,16 +164,15 @@ class Interpreter:
                 raise RuntimeError("Cannot call non-function.")
             static_args = [self.eval_expr(arg, env) for arg in expr.static_args]
             args = [self.eval_expr(arg, env) for arg in expr.args]
-            print(static_args)
-            print(args)
             if isinstance(f.decl, Callable):
                 a = f.decl(*static_args)
-                print(a)
                 b = a(*args)
-                print(b)
+                # print(f"call {expr.f}[{static_args}]({args}) => {b}")
                 return b
             else:
-                return self.eval_call_expr(f.decl, static_args, args, env)
+                ret = self.eval_call_expr(f.decl, static_args, args, env)
+                # print(f"call {f.decl.name.text}[{static_args}]({args}) => {ret}")
+                return ret
         elif isinstance(expr, ReshapeExpr):
             raise NotImplementedError("ReshapeExpr not implemented yet.")
         elif isinstance(expr, BinaryExpr):
@@ -199,11 +198,11 @@ class Interpreter:
             raise NotImplementedError("MatMulExpr not implemented yet.")
         elif isinstance(expr, VariableExpr):
             val = env.lookup(expr.name.text)
-            if val == None:
+            if val is None:
                 raise RuntimeError(f"Variable {expr.name.text} not found.")
             return val
         else:
-            raise NotImplementedError("Unknown expression type.")
+            raise NotImplementedError(f"Unknown expression type: {expr}")
 
 
 class Parser:
