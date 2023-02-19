@@ -80,19 +80,19 @@ class InterpreterTestCase(unittest.TestCase):
                     [],
                     [
                         parse.BinaryExpr(
-                            op("+"),
+                            op("*"),
+                            parse.FloatExpr(0.7978845608),
                             parse.BinaryExpr(
-                                op("*"),
-                                parse.FloatExpr(0.7978845608),
+                                op("+"),
                                 parse.VariableExpr(var("x")),
-                            ),
-                            parse.BinaryExpr(
-                                op("*"),
-                                parse.FloatExpr(0.044715),
                                 parse.BinaryExpr(
-                                    op("**"),
-                                    parse.VariableExpr(var("x")),
-                                    parse.FloatExpr(3.0),
+                                    op("*"),
+                                    parse.FloatExpr(0.044715),
+                                    parse.BinaryExpr(
+                                        op("**"),
+                                        parse.VariableExpr(var("x")),
+                                        parse.FloatExpr(3.0),
+                                    ),
                                 ),
                             ),
                         )
@@ -154,7 +154,7 @@ class InterpreterTestCase(unittest.TestCase):
                 self.gelu_expr, parse.Env(None, {}, {"x": x, "Tanh": parse.Func(tanh)})
             )
             self.assertEqual(
-                ret, 0.5 * x * (1.0 + np.tanh(0.7978845608 * x + 0.044715 * x**3.0))
+                ret, 0.5 * x * (1.0 + np.tanh(0.7978845608 * (x + 0.044715 * x**3.0)))
             )
 
     def test_eval_call_expr(self):
