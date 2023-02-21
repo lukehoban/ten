@@ -1,6 +1,7 @@
 import unittest
 import parse
 import numpy as np
+from typing import Union, Sequence
 
 
 class ParserTestCase(unittest.TestCase):
@@ -54,7 +55,7 @@ class ParserTestCase(unittest.TestCase):
         self.assertEqual(len(funcs[0].args), 1)
         self.assertEqual(len(funcs[0].args[0][1].dims), 3)
         self.assertEqual(len(funcs[0].ret.dims), 3)
-        self.assertEqual(len(funcs[0].body), 1)
+        self.assertEqual(len(funcs[0].body or []), 1)
 
 
 def op(op: str) -> parse.Token:
@@ -63,6 +64,18 @@ def op(op: str) -> parse.Token:
 
 def var(name: str) -> parse.Token:
     return parse.Token("IDENT", name, 0, 0)
+
+
+def tensor_type(dims: Sequence[Union[int, str]]) -> parse.TensorType:
+    ret_dims: list[parse.Token] = []
+    for d in dims:
+        if d == "...":
+            ret_dims.append(parse.Token("OP", "...", 0, 0))
+        elif isinstance(d, int):
+            ret_dims.append(parse.Token("NUMBER", str(d), 0, 0))
+        else:
+            raise ValueError(f"Invalid dimension: {d}")
+    return parse.TensorType(ret_dims)
 
 
 class InterpreterTestCase(unittest.TestCase):
@@ -125,7 +138,8 @@ class InterpreterTestCase(unittest.TestCase):
                             parse.VariableExpr(var("x")),
                             parse.CallExpr(
                                 parse.VariableExpr(var("Max")),
-                                [parse.VariableExpr(var("N"))],
+                                # TODO:[parse.VariableExpr(var("N"))],
+                                [],
                                 [parse.VariableExpr(var("x"))],
                             ),
                         ),
@@ -138,7 +152,8 @@ class InterpreterTestCase(unittest.TestCase):
                     parse.VariableExpr(var("exp_x")),
                     parse.CallExpr(
                         parse.VariableExpr(var("Sum")),
-                        [parse.VariableExpr(var("N"))],
+                        # TODO: [parse.VariableExpr(var("N"))],
+                        [],
                         [parse.VariableExpr(var("exp_x"))],
                     ),
                 ),
@@ -151,7 +166,8 @@ class InterpreterTestCase(unittest.TestCase):
         tanh = lambda *static_args: lambda *args: np.tanh(args[0])
         for x in [-1.0, 0.0, 1.0]:
             ret = i.eval_expr(
-                self.gelu_expr, parse.Env(None, {}, {"x": x, "Tanh": parse.Func(tanh)})
+                self.gelu_expr,
+                parse.Env(None, {}, {"x": x, "Tanh": parse.Func(tanh)}, {}),
             )
             self.assertEqual(
                 ret, 0.5 * x * (1.0 + np.tanh(0.7978845608 * (x + 0.044715 * x**3.0)))
@@ -174,14 +190,16 @@ class InterpreterTestCase(unittest.TestCase):
                         "Tanh": parse.Func(tanh),
                         "Gelu": parse.Func(self.gelu_decl),
                     },
+                    {},
                 ),
             )
             self.assertEqual(
-                ret, 0.5 * x * (1.0 + np.tanh(0.7978845608 * x + 0.044715 * x**3.0))
+                ret, 0.5 * x * (1.0 + np.tanh(0.7978845608 * (x + 0.044715 * x**3.0)))
             )
 
     def test_eval_call_softmax(self):
         i = parse.Interpreter()
+        c = parse.Compiler()
         exp = lambda *static_args: lambda *args: np.exp(args[0])
         max = lambda *static_args: lambda *args: np.max(args[0], axis=-1, keepdims=True)
         sum = lambda *static_args: lambda *args: np.sum(args[0], axis=-1, keepdims=True)
@@ -195,17 +213,59 @@ class InterpreterTestCase(unittest.TestCase):
                 np.array([[0.26894142, 0.73105858], [0.26894142, 0.73105858]]),
             ),
         ]:
-            ret = i.eval_call_expr(
+            softmax_decl, compiledfuncs = c.compile_function(
                 self.softmax_decl,
                 [np.shape(arr)[-1]],
+                parse.TypeEnv(
+                    None,
+                    {},
+                    {},
+                    {
+                        "Exp": parse.FunctionDeclaration(
+                            var("Exp"),
+                            [],
+                            [(var("x"), tensor_type(["..."]))],
+                            tensor_type(["..."]),
+                            None,
+                        ),
+                        "Max": parse.FunctionDeclaration(
+                            var("Max"),
+                            [],
+                            [(var("x"), tensor_type(["..."]))],
+                            tensor_type(["..."]),
+                            None,
+                        ),
+                        "Sum": parse.FunctionDeclaration(
+                            var("Sum"),
+                            [],
+                            [(var("x"), tensor_type(["..."]))],
+                            tensor_type(["..."]),
+                            None,
+                        ),
+                    },
+                ),
+            )
+            vars: dict[str, parse.Value] = dict(
+                {
+                    "Exp": parse.Func(exp),
+                    "Max": parse.Func(max),
+                    "Sum": parse.Func(sum),
+                }
+            )
+            for (k, f) in compiledfuncs.items():
+                vars[k] = parse.Func(f)
+            ret = i.eval_call_expr(
+                softmax_decl,
+                [],  #  TODO: Remove this - it's part of compilation
                 [arr],
                 parse.Env(
                     None,
                     {},
+                    vars,
                     {
-                        "Exp": parse.Func(exp),
-                        "Max": parse.Func(max),
-                        "Sum": parse.Func(sum),
+                        "Exp": exp(),
+                        "Max": max(),
+                        "Sum": sum(),
                     },
                 ),
             )

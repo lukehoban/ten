@@ -81,7 +81,7 @@ class FunctionDeclaration:
     static_args: Sequence[Token]
     args: Sequence[Tuple[Token, TensorType]]
     ret: TensorType
-    body: Sequence[Statement]
+    body: Optional[Sequence[Statement]]
 
 
 Value = Union[float, np.ndarray, "Func", Sequence["Value"]]
@@ -93,10 +93,225 @@ class Func:
 
 
 @dataclass
+class TypeEnv:
+    parent: Optional["TypeEnv"]
+    static_vars: Dict[str, Value]
+    vars: Dict[str, TensorType]
+    funcs: Dict[str, FunctionDeclaration]
+
+    def lookup_func(self, name: str) -> Optional[FunctionDeclaration]:
+        ret = self.funcs.get(name)
+        if ret is not None:
+            return ret
+        if self.parent != None:
+            return self.parent.lookup_func(name)
+        return None
+
+    def lookup(self, name: str) -> Optional[TensorType]:
+        ret = self.static_vars.get(name)
+        if ret is not None:
+            raise NotImplementedError("static vars not implemented in typeenv lookup")
+        ret = self.vars.get(name)
+        if ret is not None:
+            return ret
+        if self.parent != None:
+            return self.parent.lookup(name)
+        return None
+
+    def lookup_static(self, name: str) -> Optional[Value]:
+        ret = self.static_vars.get(name)
+        if ret != None:
+            return ret
+        if self.parent != None:
+            return self.parent.lookup_static(name)
+        return None
+
+
+class Compiler:
+    i = 0
+
+    def compile_function(
+        self, func: FunctionDeclaration, static_args: Sequence[Value], env: TypeEnv
+    ) -> Tuple[FunctionDeclaration, Dict[str, FunctionDeclaration]]:
+        print(f"compiling {func.name.text}")
+        if len(static_args) != len(func.static_args):
+            raise Exception(
+                f"Wrong number of static args for {func.name.text}, expected {func.static_args} got {static_args}"
+            )
+        static_vars: Dict[str, Value] = {}
+        for [var, val] in zip(func.static_args, static_args):
+            static_vars[var.text] = val
+        env = TypeEnv(env, static_vars, {}, {})
+        ret_type = self.eval_type(func.ret, env)
+        args = [(var, self.eval_type(typ, env)) for (var, typ) in func.args]
+        for (var, typ) in args:
+            env.vars[var.text] = typ
+        body = (
+            [self.compile_statement(stmt, env, ret_type) for stmt in func.body]
+            if func.body is not None
+            else None
+        )
+        return (
+            FunctionDeclaration(
+                name=func.name,
+                static_args=[],
+                args=args,
+                ret=ret_type,
+                body=body,
+            ),
+            env.funcs,
+        )
+
+    def eval_type(self, typ: TensorType, env: TypeEnv) -> TensorType:
+        return TensorType([self.eval_dim(dim, env) for dim in typ.dims])
+
+    def eval_dim(self, dim: Token, env: TypeEnv) -> Token:
+        if dim.kind == "NUMBER":
+            return dim
+        elif dim.kind == "OP" and dim.text == "...":
+            return dim
+        elif dim.kind == "IDENT":
+            val = env.lookup_static(dim.text)
+            if val is None:
+                raise Exception(f"Variable {dim.text} not found")
+            if not isinstance(val, float) and not isinstance(val, int):
+                raise Exception(
+                    f"Variable {dim.text} with value '{val}' is not a number"
+                )
+            return Token("NUMBER", str(val), dim.pos, dim.indentation_level)
+        else:
+            raise NotImplementedError(
+                f"eval_dim not implemented for {dim.kind}:{dim.text}"
+            )
+
+    def compile_statement(
+        self, statement: Statement, env: TypeEnv, ret_type: TensorType
+    ) -> Statement:
+        if isinstance(statement, LetStatement):
+            expr, expr_type = self.compile_expr(statement.expr, env)
+            if len(statement.variables) == 1:
+                env.vars[statement.variables[0].text] = expr_type
+            else:
+                if len(expr_type.dims) < 1 or expr_type.dims[0] != len(
+                    statement.variables
+                ):
+                    raise Exception("Wrong number of variables in let statement")
+                for var in statement.variables:
+                    # We are splitting on the first dimension, so drop it from the type
+                    env.vars[var.text] = TensorType(expr_type.dims[1:])
+            return LetStatement(
+                variables=statement.variables,
+                expr=expr,
+            )
+        elif isinstance(statement, ReturnStatement):
+            expr, expr_type = self.compile_expr(statement.expr, env)
+            self.check_assignable_from_to(expr_type, ret_type)
+            return ReturnStatement(expr=expr)
+
+        else:
+            raise NotImplementedError(
+                f"compile_statement not implemented for {type(statement)}"
+            )
+
+    def check_assignable_from_to(self, from_type: TensorType, to_type: TensorType):
+        """
+        ... -> ... IS OK
+        ...N -> ... IS OK
+        N -> N IS OK
+        N,M -> N,M US OK
+
+        ... -> ...N IS NOT OK
+        N -> M IS NOT OK
+        N,M -> M,M IS NOT OK
+        """
+        if len(to_type.dims) > 0 and to_type.dims[0].text == "...":
+            # assert that there are no more elipses
+            if any([d == ... for d in to_type.dims[1:]]):
+                raise Exception(f"Cannot have multiple elipses in a type: {to_type}")
+            # figure out how many more non-elipses N there are
+            N = len(to_type.dims) - 1
+            # ensure that last N dimensions of from are the same as the last N dimensions of to
+            from_dims = from_type.dims[len(from_type.dims) - N :]
+            to_dims = to_type.dims[len(to_type.dims) - N :]
+        else:
+            from_dims = from_type.dims
+            to_dims = to_type.dims
+        if len(from_dims) != len(to_dims):
+            raise Exception(
+                f"Cannot assign from dimensions {from_dims} to dimensions {to_dims}"
+            )
+        for from_dim, to_dim in zip(from_dims, to_dims):
+            if from_dim.kind != to_dim.kind and from_dim.text == to_dim.text:
+                raise Exception(
+                    f"Cannot assign from dimensions {from_dims} to dimensions {to_dims}"
+                )
+        return
+
+    def compile_expr(self, expr: Expr, env: TypeEnv) -> Tuple[Expr, TensorType]:
+        if isinstance(expr, FloatExpr):
+            return expr, TensorType([])
+        elif isinstance(expr, VariableExpr):
+            t = env.lookup(expr.name.text)
+            if t is None:
+                raise Exception(f"Variable {expr.name.text} not found")
+            return expr, t
+        elif isinstance(expr, BinaryExpr):
+            left, left_type = self.compile_expr(expr.left, env)
+            right, right_type = self.compile_expr(expr.right, env)
+            # TODO: Need to actually compute the correct return type from left_type and right_type
+            return BinaryExpr(expr.op, left, right), left_type
+        elif isinstance(expr, CallExpr):
+            if not isinstance(expr.f, VariableExpr):
+                raise Exception("Function call must be a variable")
+            func = env.lookup_func(expr.f.name.text)
+            if func is None:
+                raise Exception(f"Could not find function {expr.f.name.text}")
+            # TODO: Is it okay to ignore the transitively compiled functions?
+            compiled_func, _ = self.compile_function(
+                func, [self.eval_static_expr(e, env) for e in expr.static_args], env
+            )
+            self.i = self.i + 1
+            func_name = f"{compiled_func.name.text}_{self.i}"
+            env.funcs[func_name] = compiled_func
+            compiled_args = [self.compile_expr(arg, env) for arg in expr.args]
+            if len(compiled_args) != len(compiled_func.args):
+                raise Exception(
+                    f"Cannot call function {compiled_func.name.text} with {len(compiled_args)} args, expected {len(compiled_func.args)}"
+                )
+            for ((x, param_type), (y, arg_type)) in zip(
+                compiled_func.args, compiled_args
+            ):
+                print(
+                    f"Calling {compiled_func.name.text} -- {x.text}: {param_type} with {y}: {arg_type}"
+                )
+                self.check_assignable_from_to(arg_type, param_type)
+            return (
+                CallExpr(
+                    VariableExpr(Token("IDENT", func_name, 0, 0)),
+                    [],
+                    [e for (e, _) in compiled_args],
+                ),
+                compiled_func.ret,
+            )
+        else:
+            raise NotImplementedError(f"compile_expr not implemented for {type(expr)}")
+
+    def eval_static_expr(self, expr: Expr, env: TypeEnv) -> Value:
+        if isinstance(expr, VariableExpr):
+            v = env.lookup_static(expr.name.text)
+            if v is None:
+                raise Exception(f"Could not find {expr.name.text} in scope")
+            return v
+        else:
+            raise NotImplementedError(f"eval_static_expr: {expr} {env}")
+
+
+@dataclass
 class Env:
     parent: Optional["Env"]
     static_vars: Dict[str, Value]
     vars: Dict[str, Value]
+    funcs: Dict[str, Callable[..., Value]]
 
     def lookup(self, name: str) -> Optional[Value]:
         ret = self.static_vars.get(name)
@@ -117,6 +332,14 @@ class Env:
             return self.parent.lookup_static(name)
         return None
 
+    def lookup_builtin(self, name: str) -> Optional[Callable[..., Value]]:
+        ret = self.funcs.get(name)
+        if ret != None:
+            return ret
+        if self.parent != None:
+            return self.parent.lookup_builtin(name)
+        return None
+
 
 class Interpreter:
     def eval_call_expr(
@@ -126,6 +349,13 @@ class Interpreter:
         args: list[Value],
         env: Env,
     ) -> Value:
+        if program.body is None:
+            # built-in function
+            name = program.name.text.split("_")[0]
+            built_in = env.lookup_builtin(name)
+            if built_in is None:
+                raise Exception(f"Could not find built-in function {name}")
+            return built_in(args)
         static_vars: Dict[str, Value] = {}
         for [var, val] in zip(program.static_args, static_args):
             static_vars[var.text] = val
@@ -133,7 +363,7 @@ class Interpreter:
         for [(var, typ), val] in zip(program.args, args):
             # TODO: type check
             vars[var.text] = val
-        env = Env(env, static_vars, vars)
+        env = Env(env, static_vars, vars, {})
         for stmt in program.body:
             res = self.eval_stmt(stmt, env)
             if res is not None:
@@ -161,7 +391,7 @@ class Interpreter:
         elif isinstance(expr, CallExpr):
             f = self.eval_expr(expr.f, env)
             if not isinstance(f, Func):
-                raise RuntimeError("Cannot call non-function.")
+                raise RuntimeError(f"Cannot call non-function {expr}.")
             static_args = [self.eval_expr(arg, env) for arg in expr.static_args]
             args = [self.eval_expr(arg, env) for arg in expr.args]
             if isinstance(f.decl, Callable):
