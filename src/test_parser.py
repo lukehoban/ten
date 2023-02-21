@@ -161,13 +161,70 @@ class InterpreterTestCase(unittest.TestCase):
         ],
     )
 
+    built_ins = {
+        "Exp": parse.FunctionDeclaration(
+            var("Exp"),
+            [],
+            [(var("x"), tensor_type(["..."]))],
+            tensor_type(["..."]),
+            None,
+        ),
+        "Max": parse.FunctionDeclaration(
+            var("Max"),
+            [],
+            [(var("x"), tensor_type(["..."]))],
+            tensor_type(["..."]),
+            None,
+        ),
+        "Sum": parse.FunctionDeclaration(
+            var("Sum"),
+            [],
+            [(var("x"), tensor_type(["..."]))],
+            tensor_type(["..."]),
+            None,
+        ),
+        "Tanh": parse.FunctionDeclaration(
+            var("Tanh"),
+            [],
+            [(var("x"), tensor_type(["..."]))],
+            tensor_type(["..."]),
+            None,
+        ),
+    }
+
+    built_in_impls = {
+        "Exp": lambda *static_args: lambda *args: np.exp(args[0]),
+        "Max": lambda *static_args: lambda *args: np.max(
+            args[0], axis=-1, keepdims=True
+        ),
+        "Sum": lambda *static_args: lambda *args: np.sum(
+            args[0], axis=-1, keepdims=True
+        ),
+        "Tanh": lambda *static_args: lambda *args: np.tanh(args[0]),
+    }
+
     def test_eval_simple_expr(self):
+        c = parse.Compiler()
         i = parse.Interpreter()
         tanh = lambda *static_args: lambda *args: np.tanh(args[0])
         for x in [-1.0, 0.0, 1.0]:
-            ret = i.eval_expr(
+            expr, _ = c.compile_expr(
                 self.gelu_expr,
-                parse.Env(None, {}, {"x": x, "Tanh": parse.Func(tanh)}, {}),
+                parse.TypeEnv(None, {}, {"x": tensor_type([])}, self.built_ins),
+            )
+            ret = i.eval_expr(
+                expr,
+                parse.Env(
+                    None,
+                    {},
+                    {
+                        "x": x,
+                        "Tanh_1": parse.Func(tanh),
+                        "Tanh_2": parse.Func(tanh),
+                        "Tanh_3": parse.Func(tanh),
+                    },
+                    {},
+                ),
             )
             self.assertEqual(
                 ret, 0.5 * x * (1.0 + np.tanh(0.7978845608 * (x + 0.044715 * x**3.0)))
@@ -175,13 +232,32 @@ class InterpreterTestCase(unittest.TestCase):
 
     def test_eval_call_expr(self):
         i = parse.Interpreter()
+        c = parse.Compiler()
         tanh = lambda *static_args: lambda *args: np.tanh(args[0])
         expr = lambda x: parse.CallExpr(
             parse.VariableExpr(var("Gelu")), [], [parse.FloatExpr(x)]
         )
         for x in [-1.0, 0.0, 1.0]:
-            ret = i.eval_expr(
+            exp, _ = c.compile_expr(
                 expr(x),
+                parse.TypeEnv(
+                    None,
+                    {},
+                    {},
+                    {
+                        "Gelu": parse.FunctionDeclaration(
+                            var("Gelu"),
+                            [],
+                            [(var("x"), parse.TensorType([op("...")]))],
+                            parse.TensorType([op("...")]),
+                            [parse.ReturnStatement(self.gelu_expr)],
+                        ),
+                        **self.built_ins,
+                    },
+                ),
+            )
+            ret = i.eval_expr(
+                exp,
                 parse.Env(
                     None,
                     {},
@@ -189,6 +265,9 @@ class InterpreterTestCase(unittest.TestCase):
                         "x": x,
                         "Tanh": parse.Func(tanh),
                         "Gelu": parse.Func(self.gelu_decl),
+                        "Gelu_2": parse.Func(self.gelu_decl),
+                        "Gelu_4": parse.Func(self.gelu_decl),
+                        "Gelu_6": parse.Func(self.gelu_decl),
                     },
                     {},
                 ),
