@@ -79,6 +79,26 @@ FFN[S,E]|c_fc, c_proj|(x:{S,E}) -> {S,E}:
 
 
 
-    
+// CURRENT
+// Notes:
+// * Max, Sum, Mean, Var builtins over last dimension
 
+Gelu(x: {...}) -> {...}:
+    return 0.5 * x * (1 + Tanh(0.7978845608 * x + 0.044715 * x**3))
+
+SoftMax[N](x: {...,N}) -> {...,N}:
+    let exp_x = Exp(x - Max(x))
+    return exp_x / Sum(exp_x)
+
+LayerNorm[S,E]|g:{E},b:{E}|(x: {S,E}) -> {S,E}:
+    let mean = Mean(x)
+    let variance = Var(x{S,E})
+    return g * (x - mean) / Sqrt(variance + 1e-5) + b
+
+Linear[N,K]|w:{N,K},b:{K}|(x: {...N}) -> {...K}:
+    return @{...K}(x{...N}, w{N,K}) + b
+
+FFN[S,E]|c_fc, c_proj|(x:{S,E}) -> {S,E}:
+    let a = Gelu(Linear[E,E*4]|c_fc...|(x))
+    return Linear[E*4,E]|c_proj...|(a)
 

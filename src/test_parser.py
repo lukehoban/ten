@@ -1,7 +1,7 @@
 import unittest
 import parse
 import numpy as np
-from typing import Union, Sequence
+from typing import Union, Sequence, Optional
 
 
 class ParserTestCase(unittest.TestCase):
@@ -76,6 +76,62 @@ def tensor_type(dims: Sequence[Union[int, str]]) -> parse.TensorType:
         else:
             raise ValueError(f"Invalid dimension: {d}")
     return parse.TensorType(ret_dims)
+
+
+class CompilerTestCase(unittest.TestCase):
+    def test_applied_return_type(self):
+        compiler = parse.Compiler()
+        test_cases: list[
+            tuple[
+                tuple[list[list[int | str]], list[int | str]],
+                list[list[int | str]],
+                Optional[list[int | str]],
+            ]
+        ] = [
+            (([["..."]], ["..."]), [["...", 3]], ["...", 3]),  # Exp
+            (([["...", 3]], ["...", 1]), [["...", 4, 3]], ["...", 4, 1]),  # Max
+            (([["...", 3]], ["...", 3]), [["...", 3]], ["...", 3]),  # SoftMax
+        ]
+        for ((a, b), c, tr) in test_cases:
+            a = [tensor_type(x) for x in a]
+            b = tensor_type(b)
+            c = [tensor_type(x) for x in c]
+            if tr is None:
+                self.assertRaises(Exception, compiler.applied_return_type, a, b, c)
+            else:
+                tr = tensor_type(tr)
+                f = parse.FunctionDeclaration(
+                    var("f"),
+                    [],
+                    [(var(f"x_{i}"), at) for i, at in enumerate(a)],
+                    b,
+                    None,
+                )
+                self.assertEqual(compiler.applied_return_type(f, c), tr)
+
+    def test_check_broadcastable(self):
+        compiler = parse.Compiler()
+        test_cases: list[
+            tuple[tuple[list[int | str], list[int | str]], Optional[list[int | str]]]
+        ] = [
+            (([], [3]), [3]),
+            (([3], [3]), [3]),
+            (([3], [3, 4]), None),
+            (([1, 4], [3, 1]), [3, 4]),
+            (([1, 4], [1, 3, 1]), [1, 3, 4]),
+            (([], ["..."]), ["..."]),
+            ((["...", 3], ["..."]), None),
+            ((["...", 4], ["...", 3, 1]), None),
+            # ((["...", 4], [1, 1]), ["...", 4]), # TODO: Is this legit?  The zero-d expansion of ... is invalid
+        ]
+        for ((a, b), tr) in test_cases:
+            a = tensor_type(a)
+            b = tensor_type(b)
+            if tr is None:
+                self.assertRaises(Exception, compiler.check_broadcastable, a, b)
+            else:
+                tr = tensor_type(tr)
+                self.assertEqual(compiler.check_broadcastable(a, b), tr)
 
 
 class InterpreterTestCase(unittest.TestCase):

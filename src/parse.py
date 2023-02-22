@@ -247,6 +247,35 @@ class Compiler:
                 )
         return
 
+    def check_broadcastable(
+        self, from_type: TensorType, to_type: TensorType
+    ) -> TensorType:
+        num_dims = max(len(from_type.dims), len(to_type.dims))
+        ret_dims: list[Token] = []
+        from_i = len(from_type.dims) - num_dims - 1
+        to_i = len(to_type.dims) - num_dims - 1
+        for i in range(num_dims):
+            from_i = from_i + 1
+            to_i = to_i + 1
+            from_at_i = from_type.dims[from_i].text if from_i >= 0 else None
+            to_at_i = to_type.dims[to_i].text if to_i >= 0 else None
+            if from_at_i == "..." or to_at_i == "...":
+                if from_at_i == "..." and to_at_i == "...":
+                    continue
+                if from_at_i == "..." and to_at_i is None:
+                    ret_dims.append(Token("OP", "...", 0, 0))
+                    continue
+                if to_at_i == "..." and from_at_i is None:
+                    ret_dims.append(Token("OP", "...", 0, 0))
+                    continue
+                raise Exception(f"invalid broadcast between {from_type} and {to_type}")
+            from_at_i = int(from_at_i) if from_at_i is not None else 1
+            to_at_i = int(to_at_i) if to_at_i is not None else 1
+            if not (from_at_i == to_at_i or from_at_i == 1 or to_at_i == 1):
+                raise Exception(f"invalid broadcast between {from_type} and {to_type}")
+            ret_dims.append(Token("NUMBER", str(max(from_at_i, to_at_i)), 0, 0))
+        return TensorType(ret_dims)
+
     def compile_expr(self, expr: Expr, env: TypeEnv) -> Tuple[Expr, TensorType]:
         if isinstance(expr, FloatExpr):
             return expr, TensorType([])
@@ -258,8 +287,8 @@ class Compiler:
         elif isinstance(expr, BinaryExpr):
             left, left_type = self.compile_expr(expr.left, env)
             right, right_type = self.compile_expr(expr.right, env)
-            # TODO: Need to actually compute the correct return type from left_type and right_type
-            return BinaryExpr(expr.op, left, right), left_type
+            ret_type = self.check_broadcastable(left_type, right_type)
+            return BinaryExpr(expr.op, left, right), ret_type
         elif isinstance(expr, CallExpr):
             if not isinstance(expr.f, VariableExpr):
                 raise Exception("Function call must be a variable")
@@ -281,17 +310,15 @@ class Compiler:
             for ((x, param_type), (y, arg_type)) in zip(
                 compiled_func.args, compiled_args
             ):
-                print(
-                    f"Calling {compiled_func.name.text} -- {x.text}: {param_type} with {y}: {arg_type}"
-                )
                 self.check_assignable_from_to(arg_type, param_type)
+            ret_type = self.applied_return_type(compiled_func, [t for (_, t) in compiled_args])
             return (
                 CallExpr(
                     VariableExpr(Token("IDENT", func_name, 0, 0)),
                     [],
                     [e for (e, _) in compiled_args],
                 ),
-                compiled_func.ret,
+                ret_type
             )
         else:
             raise NotImplementedError(f"compile_expr not implemented for {type(expr)}")
@@ -304,6 +331,37 @@ class Compiler:
             return v
         else:
             raise NotImplementedError(f"eval_static_expr: {expr} {env}")
+
+    def applied_return_type(
+        self, f: FunctionDeclaration, arg_types: list[TensorType]
+    ) -> TensorType:
+        if len(f.args) != len(arg_types):
+            raise Exception(f"Cannot apply {f.name.text} to {arg_types}")
+        dotdotdot_type = None
+        for ((_, param_type), arg_type) in zip(f.args, arg_types):
+            # substitute into ...
+            if len(param_type.dims) > 0 and param_type.dims[0].text == "...":
+                param_ending_dims = param_type.dims[1:]
+                num_arg_ending_dims = len(arg_type.dims) - len(param_ending_dims)
+                if num_arg_ending_dims <= 0:
+                    raise Exception(
+                        f"Cannot apply {f.name.text} to {arg_types} - {arg_type} not compatible with {param_type}"
+                    )
+                arg_starting_dims = arg_type.dims[0:num_arg_ending_dims]
+                if dotdotdot_type is None:
+                    dotdotdot_type = TensorType(arg_starting_dims)
+                if dotdotdot_type.dims != arg_starting_dims:
+                    raise Exception(
+                        f"Cannot apply {f.name.text} to {arg_types} - {arg_type} not compatible with {param_type}"
+                    )
+        if (
+            dotdotdot_type is not None
+            and len(f.ret.dims) > 0
+            and f.ret.dims[0].text == "..."
+        ):
+            ret_dims = [*dotdotdot_type.dims, *f.ret.dims[1:]]
+            return TensorType(ret_dims)
+        return f.ret
 
 
 @dataclass
