@@ -79,6 +79,7 @@ class TensorType:
 class FunctionDeclaration:
     name: Token
     static_args: Sequence[Token]
+    params: Sequence[Tuple[Token, TensorType]]
     args: Sequence[Tuple[Token, TensorType]]
     ret: TensorType
     body: Optional[Sequence[Statement]]
@@ -144,7 +145,10 @@ class Compiler:
         env = TypeEnv(env, static_vars, {}, {})
         ret_type = self.eval_type(func.ret, env)
         args = [(var, self.eval_type(typ, env)) for (var, typ) in func.args]
-        for (var, typ) in args:
+        for (var, typ) in args: 
+            env.vars[var.text] = typ
+        params = [(var, self.eval_type(typ, env)) for (var, typ) in func.params]
+        for (var, typ) in params: 
             env.vars[var.text] = typ
         body = (
             [self.compile_statement(stmt, env, ret_type) for stmt in func.body]
@@ -155,6 +159,7 @@ class Compiler:
             FunctionDeclaration(
                 name=func.name,
                 static_args=[],
+                params=params,
                 args=args,
                 ret=ret_type,
                 body=body,
@@ -269,8 +274,8 @@ class Compiler:
                     ret_dims.append(Token("OP", "...", 0, 0))
                     continue
                 raise Exception(f"invalid broadcast between {from_type} and {to_type}")
-            from_at_i = int(from_at_i) if from_at_i is not None else 1
-            to_at_i = int(to_at_i) if to_at_i is not None else 1
+            from_at_i = int(float(from_at_i)) if from_at_i is not None else 1
+            to_at_i = int(float(to_at_i)) if to_at_i is not None else 1
             if not (from_at_i == to_at_i or from_at_i == 1 or to_at_i == 1):
                 raise Exception(f"invalid broadcast between {from_type} and {to_type}")
             ret_dims.append(Token("NUMBER", str(max(from_at_i, to_at_i)), 0, 0))
@@ -287,7 +292,29 @@ class Compiler:
         elif isinstance(expr, BinaryExpr):
             left, left_type = self.compile_expr(expr.left, env)
             right, right_type = self.compile_expr(expr.right, env)
-            ret_type = self.check_broadcastable(left_type, right_type)
+            ret_type: TensorType
+            if expr.op.text in ("+", "-", "*", "/", "**"):
+                ret_type = self.check_broadcastable(left_type, right_type)
+            elif expr.op.text in ("@"):
+                if len(right_type.dims) == 0 or len(left_type.dims) == 0:
+                    raise Exception(f"Cannot @ a scalar")
+                if len(right_type.dims) == 1:
+                    if right_type.dims[0].text == "...":
+                        raise Exception(f"Cannot @ a ...")
+                    right_type = TensorType(
+                        [ *right_type.dims, Token("NUMBER", "1", 0, 0),]
+                    )
+                elif len(left_type.dims) == 1:
+                    if left_type.dims[0].text == "...":
+                        raise Exception(f"Cannot @ a ...")
+                    left_type = TensorType(
+                        [Token("NUMBER", "1", 0, 0), *left_type.dims]
+                    )      
+                # They now both have at least 2 non-... dimensions at the end
+                stack_ret_type = self.check_broadcastable(TensorType(left_type.dims[:-2]), TensorType(right_type.dims[:-2]))
+                ret_type = TensorType([*stack_ret_type.dims, left_type.dims[-2], right_type.dims[-1]])
+            else:
+                raise Exception(f"Unknown binary op {expr.op.text}")
             return BinaryExpr(expr.op, left, right), ret_type
         elif isinstance(expr, CallExpr):
             if not isinstance(expr.f, VariableExpr):
@@ -343,7 +370,7 @@ class Compiler:
             if len(param_type.dims) > 0 and param_type.dims[0].text == "...":
                 param_ending_dims = param_type.dims[1:]
                 num_arg_ending_dims = len(arg_type.dims) - len(param_ending_dims)
-                if num_arg_ending_dims <= 0:
+                if num_arg_ending_dims < 0:
                     raise Exception(
                         f"Cannot apply {f.name.text} to {arg_types} - {arg_type} not compatible with {param_type}"
                     )
@@ -367,27 +394,15 @@ class Compiler:
 @dataclass
 class Env:
     parent: Optional["Env"]
-    static_vars: Dict[str, Value]
     vars: Dict[str, Value]
     funcs: Dict[str, Callable[..., Value]]
 
     def lookup(self, name: str) -> Optional[Value]:
-        ret = self.static_vars.get(name)
-        if ret is not None:
-            return ret
         ret = self.vars.get(name)
         if ret is not None:
             return ret
         if self.parent != None:
             return self.parent.lookup(name)
-        return None
-
-    def lookup_static(self, name: str) -> Optional[Value]:
-        ret = self.static_vars.get(name)
-        if ret != None:
-            return ret
-        if self.parent != None:
-            return self.parent.lookup_static(name)
         return None
 
     def lookup_builtin(self, name: str) -> Optional[Callable[..., Value]]:
@@ -403,7 +418,7 @@ class Interpreter:
     def eval_call_expr(
         self,
         program: FunctionDeclaration,
-        static_args: list[Value],
+        params: list[Value],
         args: list[Value],
         env: Env,
     ) -> Value:
@@ -414,14 +429,13 @@ class Interpreter:
             if built_in is None:
                 raise Exception(f"Could not find built-in function {name}")
             return built_in(args)
-        static_vars: Dict[str, Value] = {}
-        for [var, val] in zip(program.static_args, static_args):
-            static_vars[var.text] = val
+        param_vars: Dict[str, Value] = {}
+        for [(var, var_type), val] in zip(program.params, params):
+            param_vars[var.text] = val
         vars: Dict[str, Value] = {}
         for [(var, typ), val] in zip(program.args, args):
-            # TODO: type check
             vars[var.text] = val
-        env = Env(env, static_vars, vars, {})
+        env = Env(env, {**param_vars, **vars}, {})
         for stmt in program.body:
             res = self.eval_stmt(stmt, env)
             if res is not None:
@@ -480,6 +494,8 @@ class Interpreter:
                 return left / right
             if expr.op.text == "**":
                 return left**right
+            if expr.op.text == "@":
+                return np.matmul(left, right)
             else:
                 raise RuntimeError(f"Unknown binary operator: {expr.op.text}")
         elif isinstance(expr, MatMulExpr):
@@ -623,6 +639,7 @@ class Parser:
             static_args.append(tok)
             tok = self.read_token()
         tok = self.read_token()
+        # TODO: Hyper args
         args = []
         while tok.text == "(" or tok.text == ",":
             tok = self.read_token()
@@ -651,7 +668,7 @@ class Parser:
         ):
             statements.append(self.parse_statement())
             next_tok = self.peek_token()
-        return FunctionDeclaration(name, static_args, args, ret, statements)
+        return FunctionDeclaration(name, static_args, [], args, ret, statements)
 
     def parse_statement(self) -> Statement:
         next_tok = self.read_token()
