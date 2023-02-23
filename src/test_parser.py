@@ -42,7 +42,7 @@ class ParserTestCase(unittest.TestCase):
 
     # def test_parse_csa(self):
     #     str = """
-    #     CausalSelfAttention[Embed, Heads, dropout](x : {B T Embed}) -> {B T Embed}: 
+    #     CausalSelfAttention[Embed, Heads, dropout](x : {B T Embed}) -> {B T Embed}:
     #         let q,k,v = Linear[Embed, Embed*3](x) {B T (3 Heads K) -> 3 B Heads T K}
     #         return q
     #     """
@@ -151,6 +151,7 @@ class InterpreterTestCase(unittest.TestCase):
                 parse.CallExpr(
                     parse.VariableExpr(var("Tanh")),
                     [],
+                    [],
                     [
                         parse.BinaryExpr(
                             op("*"),
@@ -194,6 +195,7 @@ class InterpreterTestCase(unittest.TestCase):
                 parse.CallExpr(
                     parse.VariableExpr(var("Exp")),
                     [],
+                    [],
                     [
                         parse.BinaryExpr(
                             op("-"),
@@ -201,6 +203,7 @@ class InterpreterTestCase(unittest.TestCase):
                             parse.CallExpr(
                                 parse.VariableExpr(var("Max")),
                                 # TODO:[parse.VariableExpr(var("N"))],
+                                [],
                                 [],
                                 [parse.VariableExpr(var("x"))],
                             ),
@@ -215,6 +218,7 @@ class InterpreterTestCase(unittest.TestCase):
                     parse.CallExpr(
                         parse.VariableExpr(var("Sum")),
                         # TODO: [parse.VariableExpr(var("N"))],
+                        [],
                         [],
                         [parse.VariableExpr(var("exp_x"))],
                     ),
@@ -245,6 +249,59 @@ class InterpreterTestCase(unittest.TestCase):
                     parse.VariableExpr(var("b")),
                 )
             )
+        ],
+    )
+
+    """
+    FFN[S,E]|c_fc, c_proj|(x:{S,E}) -> {S,E}:
+        let a = Gelu(Linear[E,E*4]|c_fc...|(x))
+        return Linear[E*4,E]|c_proj...|(a)
+    """
+    ffn_decl = parse.FunctionDeclaration(
+        var("FFN"),
+        [var("S"), var("E")],
+        [(var("c_fc"), tensor_type([])), (var("c_proj"), tensor_type([]))],
+        [(var("x"), parse.TensorType([var("S"), var("E")]))],
+        parse.TensorType([var("S"), var("E")]),
+        [
+            parse.LetStatement(
+                [var("a")],
+                parse.CallExpr(
+                    parse.VariableExpr(var("Gelu")),
+                    [],
+                    [],
+                    [
+                        parse.CallExpr(
+                            parse.VariableExpr(var("Linear")),
+                            [
+                                parse.VariableExpr(var("E")),
+                                parse.BinaryExpr(
+                                    op("*"),
+                                    parse.VariableExpr(var("E")),
+                                    parse.FloatExpr(4.0),
+                                ),
+                            ],
+                            [parse.VariableExpr(var("c_fc"))],
+                            [parse.VariableExpr(var("x"))],
+                        ),
+                    ],
+                ),
+            ),
+            parse.ReturnStatement(
+                parse.CallExpr(
+                    parse.VariableExpr(var("Linear")),
+                    [
+                        parse.BinaryExpr(
+                            op("*"),
+                            parse.VariableExpr(var("E")),
+                            parse.FloatExpr(4.0),
+                        ),
+                        parse.VariableExpr(var("E")),
+                    ],
+                    [parse.VariableExpr(var("c_proj"))],
+                    [parse.VariableExpr(var("a"))],
+                )
+            ),
         ],
     )
 
@@ -284,15 +341,18 @@ class InterpreterTestCase(unittest.TestCase):
     }
 
     built_in_impls = {
-        "Exp": lambda *static_args: lambda *args: np.exp(args[0]),
-        "Max": lambda *static_args: lambda *args: np.max(
-            args[0], axis=-1, keepdims=True
+        "Exp": parse.Func(lambda *static_args: lambda *args: np.exp(args[0])),
+        "Max": parse.Func(
+            lambda *static_args: lambda *args: np.max(args[0], axis=-1, keepdims=True)
         ),
-        "Sum": lambda *static_args: lambda *args: np.sum(
-            args[0], axis=-1, keepdims=True
+        "Sum": parse.Func(
+            lambda *static_args: lambda *args: np.sum(args[0], axis=-1, keepdims=True)
         ),
-        "Tanh": lambda *static_args: lambda *args: np.tanh(args[0]),
+        "Tanh": parse.Func(lambda *static_args: lambda *args: np.tanh(args[0])),
     }
+
+    def gelu(self, x: Union[np.ndarray, float]): 
+        return 0.5 * x * (1.0 + np.tanh(0.7978845608 * (x + 0.044715 * x**3.0))) 
 
     def test_eval_simple_expr(self):
         c = parse.Compiler()
@@ -317,7 +377,7 @@ class InterpreterTestCase(unittest.TestCase):
                 ),
             )
             self.assertEqual(
-                ret, 0.5 * x * (1.0 + np.tanh(0.7978845608 * (x + 0.044715 * x**3.0)))
+                ret, self.gelu(x)
             )
 
     def test_eval_call_expr(self):
@@ -325,7 +385,7 @@ class InterpreterTestCase(unittest.TestCase):
         c = parse.Compiler()
         tanh = lambda *static_args: lambda *args: np.tanh(args[0])
         expr = lambda x: parse.CallExpr(
-            parse.VariableExpr(var("Gelu")), [], [parse.FloatExpr(x)]
+            parse.VariableExpr(var("Gelu")), [], [], [parse.FloatExpr(x)]
         )
         for x in [-1.0, 0.0, 1.0]:
             exp, _ = c.compile_expr(
@@ -363,21 +423,66 @@ class InterpreterTestCase(unittest.TestCase):
                 ),
             )
             self.assertEqual(
-                ret, 0.5 * x * (1.0 + np.tanh(0.7978845608 * (x + 0.044715 * x**3.0)))
+                ret, self.gelu(x)
             )
 
     def test_eval_call_linear(self):
         i = parse.Interpreter()
         c = parse.Compiler()
-        expected = [6.0, 7.0]
         linear_decl, compiledfuncs = c.compile_function(
             self.linear_decl, [3.0, 4.0], parse.TypeEnv(None, {}, {}, self.built_ins)
-        )        
-        w = np.array([[1.0, 2.0, 3.0, 4.0], [5.0, 6.0, 7.0, 8.0], [9.0, 10.0, 11.0, 12.0]])
+        )
+        w = np.array(
+            [[1.0, 2.0, 3.0, 4.0], [5.0, 6.0, 7.0, 8.0], [9.0, 10.0, 11.0, 12.0]]
+        )
         b = np.array([3.0, 4.0, 5.0, 6.0])
         x = np.array([2.0, 3.0, 4.0])
-        expected = x@w + b
+        expected = x @ w + b
         ret = i.eval_call_expr(linear_decl, [w, b], [x], parse.Env(None, {}, {}))
+        if isinstance(ret, np.ndarray):
+            np.testing.assert_array_almost_equal(ret, expected)
+        else:
+            self.assertIsInstance(ret, np.ndarray)
+
+    def test_eval_call_ffn(self):
+        i = parse.Interpreter()
+        c = parse.Compiler()
+        
+        ffn_decl, compiledfuncs = c.compile_function(
+            self.ffn_decl,
+            [3.0, 1.0],
+            parse.TypeEnv(
+                None,
+                {},
+                {},
+                {"Gelu": self.gelu_decl, "Linear": self.linear_decl, **self.built_ins},
+            ),
+        )
+        # N=1, K=4
+        w1 = np.array([[1.0, 2.0, 3.0, 4.0]])
+        b1 = np.array([3.0, 4.0, 5.0, 6.0])
+        # N=4, K=1
+        w2 = np.array([[1.0], [2.0], [3.0], [4.0]])
+        b2 = np.array([3.0])
+        x = np.array([[2.0], [3.0], [4.0]])
+        ret = i.eval_call_expr(
+            ffn_decl,
+            [[w1, b1], [w2, b2]],
+            [x],
+            parse.Env(
+                None,
+                {
+                    "Gelu_2": parse.Func(self.gelu_decl),
+                    "Linear_3": parse.Func(self.linear_decl),
+                    "Linear_4": parse.Func(self.linear_decl),
+                    # "Gelu_4": parse.Func(self.gelu_decl),
+                    # "Gelu_6": parse.Func(self.gelu_decl),
+                    **self.built_in_impls,
+                },
+                {},
+            ),
+        )
+        expected = expected = self.gelu(x @ w1 + b1) @ w2 + b2
         if isinstance(ret, np.ndarray):
             np.testing.assert_array_almost_equal(ret, expected)
         else:

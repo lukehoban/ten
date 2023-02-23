@@ -34,6 +34,7 @@ class VariableExpr:
 class CallExpr:
     f: Expr
     static_args: Sequence[Expr]
+    param_args: Sequence[Expr]
     args: Sequence[Expr]
 
 
@@ -343,6 +344,7 @@ class Compiler:
                 CallExpr(
                     VariableExpr(Token("IDENT", func_name, 0, 0)),
                     [],
+                    expr.param_args, # TODO: Compiled?
                     [e for (e, _) in compiled_args],
                 ),
                 ret_type
@@ -351,13 +353,33 @@ class Compiler:
             raise NotImplementedError(f"compile_expr not implemented for {type(expr)}")
 
     def eval_static_expr(self, expr: Expr, env: TypeEnv) -> Value:
-        if isinstance(expr, VariableExpr):
+        if isinstance(expr, FloatExpr):
+            return expr.value
+        elif isinstance(expr, VariableExpr):
             v = env.lookup_static(expr.name.text)
             if v is None:
                 raise Exception(f"Could not find {expr.name.text} in scope")
             return v
-        else:
-            raise NotImplementedError(f"eval_static_expr: {expr} {env}")
+        elif isinstance(expr, BinaryExpr):
+            left = self.eval_static_expr(expr.left, env)
+            right = self.eval_static_expr(expr.right, env)
+            if not isinstance(left, float) and not isinstance(left, np.ndarray):
+                raise RuntimeError(f"Cannot '{expr.op.text}' non-tensor {left}.")
+            if not isinstance(right, float) and not isinstance(right, np.ndarray):
+                raise RuntimeError(f"Cannot '{expr.op.text}' non-tensor {right}.")
+            if expr.op.text == "+":
+                return left + right
+            elif expr.op.text == "-":
+                return left - right
+            elif expr.op.text == "*":
+                return left * right
+            elif expr.op.text == "/":
+                return left / right
+            elif expr.op.text == "**":
+                return left ** right
+            else:
+                raise NotImplementedError(f"eval_static_expr: {expr} {env}")
+        raise NotImplementedError(f"eval_static_expr: {expr} {env}")
 
     def applied_return_type(
         self, f: FunctionDeclaration, arg_types: list[TensorType]
@@ -458,6 +480,7 @@ class Interpreter:
         raise NotImplementedError("Unknown statement type.")
 
     def eval_expr(self, expr: Expr, env: Env) -> Value:
+        print(f"eval_expr({expr})")
         if isinstance(expr, FloatExpr):
             return expr.value
         elif isinstance(expr, CallExpr):
@@ -466,14 +489,17 @@ class Interpreter:
                 raise RuntimeError(f"Cannot call non-function {expr}.")
             static_args = [self.eval_expr(arg, env) for arg in expr.static_args]
             args = [self.eval_expr(arg, env) for arg in expr.args]
+            param_args = [self.eval_expr(arg, env) for arg in expr.param_args]
+            # TODO: We currently treat passing a single list value to a param_args as 
+            # ... exapanding it into multiple arguments.
+            if len(param_args) == 1 and isinstance(param_args[0], list):
+                param_args = param_args[0]
             if isinstance(f.decl, Callable):
                 a = f.decl(*static_args)
                 b = a(*args)
-                # print(f"call {expr.f}[{static_args}]({args}) => {b}")
                 return b
             else:
-                ret = self.eval_call_expr(f.decl, static_args, args, env)
-                # print(f"call {f.decl.name.text}[{static_args}]({args}) => {ret}")
+                ret = self.eval_call_expr(f.decl, param_args, args, env)
                 return ret
         elif isinstance(expr, ReshapeExpr):
             raise NotImplementedError("ReshapeExpr not implemented yet.")
@@ -749,7 +775,8 @@ class Parser:
                 tok = self.read_token()
             if tok.text != "]":
                 raise Exception("Expected ] found: ", tok)
-            return CallExpr(expr, static_args, args)
+            # TODO: Parse param args
+            return CallExpr(expr, static_args, [], args)
         return expr
 
     def parse_simple_expression(self) -> Expr:
