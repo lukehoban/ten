@@ -146,10 +146,10 @@ class Compiler:
         env = TypeEnv(env, static_vars, {}, {})
         ret_type = self.eval_type(func.ret, env)
         args = [(var, self.eval_type(typ, env)) for (var, typ) in func.args]
-        for (var, typ) in args: 
+        for (var, typ) in args:
             env.vars[var.text] = typ
         params = [(var, self.eval_type(typ, env)) for (var, typ) in func.params]
-        for (var, typ) in params: 
+        for (var, typ) in params:
             env.vars[var.text] = typ
         body = (
             [self.compile_statement(stmt, env, ret_type) for stmt in func.body]
@@ -303,17 +303,24 @@ class Compiler:
                     if right_type.dims[0].text == "...":
                         raise Exception(f"Cannot @ a ...")
                     right_type = TensorType(
-                        [ *right_type.dims, Token("NUMBER", "1", 0, 0),]
+                        [
+                            *right_type.dims,
+                            Token("NUMBER", "1", 0, 0),
+                        ]
                     )
                 elif len(left_type.dims) == 1:
                     if left_type.dims[0].text == "...":
                         raise Exception(f"Cannot @ a ...")
                     left_type = TensorType(
                         [Token("NUMBER", "1", 0, 0), *left_type.dims]
-                    )      
+                    )
                 # They now both have at least 2 non-... dimensions at the end
-                stack_ret_type = self.check_broadcastable(TensorType(left_type.dims[:-2]), TensorType(right_type.dims[:-2]))
-                ret_type = TensorType([*stack_ret_type.dims, left_type.dims[-2], right_type.dims[-1]])
+                stack_ret_type = self.check_broadcastable(
+                    TensorType(left_type.dims[:-2]), TensorType(right_type.dims[:-2])
+                )
+                ret_type = TensorType(
+                    [*stack_ret_type.dims, left_type.dims[-2], right_type.dims[-1]]
+                )
             else:
                 raise Exception(f"Unknown binary op {expr.op.text}")
             return BinaryExpr(expr.op, left, right), ret_type
@@ -339,15 +346,17 @@ class Compiler:
                 compiled_func.args, compiled_args
             ):
                 self.check_assignable_from_to(arg_type, param_type)
-            ret_type = self.applied_return_type(compiled_func, [t for (_, t) in compiled_args])
+            ret_type = self.applied_return_type(
+                compiled_func, [t for (_, t) in compiled_args]
+            )
             return (
                 CallExpr(
                     VariableExpr(Token("IDENT", func_name, 0, 0)),
                     [],
-                    expr.param_args, # TODO: Compiled?
+                    expr.param_args,  # TODO: Compiled?
                     [e for (e, _) in compiled_args],
                 ),
-                ret_type
+                ret_type,
             )
         else:
             raise NotImplementedError(f"compile_expr not implemented for {type(expr)}")
@@ -376,7 +385,7 @@ class Compiler:
             elif expr.op.text == "/":
                 return left / right
             elif expr.op.text == "**":
-                return left ** right
+                return left**right
             else:
                 raise NotImplementedError(f"eval_static_expr: {expr} {env}")
         raise NotImplementedError(f"eval_static_expr: {expr} {env}")
@@ -490,7 +499,7 @@ class Interpreter:
             static_args = [self.eval_expr(arg, env) for arg in expr.static_args]
             args = [self.eval_expr(arg, env) for arg in expr.args]
             param_args = [self.eval_expr(arg, env) for arg in expr.param_args]
-            # TODO: We currently treat passing a single list value to a param_args as 
+            # TODO: We currently treat passing a single list value to a param_args as
             # ... exapanding it into multiple arguments.
             if len(param_args) == 1 and isinstance(param_args[0], list):
                 param_args = param_args[0]

@@ -351,8 +351,8 @@ class InterpreterTestCase(unittest.TestCase):
         "Tanh": parse.Func(lambda *static_args: lambda *args: np.tanh(args[0])),
     }
 
-    def gelu(self, x: Union[np.ndarray, float]): 
-        return 0.5 * x * (1.0 + np.tanh(0.7978845608 * (x + 0.044715 * x**3.0))) 
+    def gelu(self, x: Union[np.ndarray, float]):
+        return 0.5 * x * (1.0 + np.tanh(0.7978845608 * (x + 0.044715 * x**3.0)))
 
     def test_eval_simple_expr(self):
         c = parse.Compiler()
@@ -376,9 +376,7 @@ class InterpreterTestCase(unittest.TestCase):
                     {},
                 ),
             )
-            self.assertEqual(
-                ret, self.gelu(x)
-            )
+            self.assertEqual(ret, self.gelu(x))
 
     def test_eval_call_expr(self):
         i = parse.Interpreter()
@@ -422,9 +420,7 @@ class InterpreterTestCase(unittest.TestCase):
                     {},
                 ),
             )
-            self.assertEqual(
-                ret, self.gelu(x)
-            )
+            self.assertEqual(ret, self.gelu(x))
 
     def test_eval_call_linear(self):
         i = parse.Interpreter()
@@ -447,7 +443,7 @@ class InterpreterTestCase(unittest.TestCase):
     def test_eval_call_ffn(self):
         i = parse.Interpreter()
         c = parse.Compiler()
-        
+
         ffn_decl, compiledfuncs = c.compile_function(
             self.ffn_decl,
             [3.0, 1.0],
