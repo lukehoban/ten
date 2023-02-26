@@ -17,7 +17,14 @@ class Token:
 
 
 Expr = Union[
-    "FloatExpr", "VariableExpr", "CallExpr", "ReshapeExpr", "BinaryExpr", "MatMulExpr"
+    "FloatExpr",
+    "VariableExpr",
+    "CallExpr",
+    "ReshapeExpr",
+    "BinaryExpr",
+    "ForExpr",
+    "IndexExpr",
+    "LetExpr",  # Currently only used as compilation target for ForExpr
 ]
 
 
@@ -55,8 +62,25 @@ class BinaryExpr:
 
 
 @dataclass
-class MatMulExpr:
-    pass
+class ForExpr:
+    index: Token
+    start: Expr
+    end: Expr
+    init: Expr
+    var: Token
+    loop: Expr
+
+
+@dataclass
+class LetExpr:
+    initializers: Sequence[Tuple[Token, Expr]]
+    body: Expr
+
+
+@dataclass
+class IndexExpr:
+    expr: Expr
+    index: Expr
 
 
 Statement = Union["LetStatement", "ReturnStatement"]
@@ -403,6 +427,31 @@ class Compiler:
                 ReshapeExpr(inner, expr.reshape_from, expr.reshape_to, contraints),
                 ret_type,
             )
+        elif isinstance(expr, IndexExpr):
+            e, e_type = self.compile_expr(expr.expr, env)
+            idx, idx_type = self.compile_expr(expr.index, env)
+            ret_type = TensorType([idx_type.dims[0], *e_type.dims[1:]])
+            print(f"compiled IndexExpr with {e_type} and {idx_type} => {ret_type}")
+            return IndexExpr(e, idx), ret_type
+        elif isinstance(expr, ForExpr):
+            start = self.eval_static_expr(expr.start, env)
+            end = self.eval_static_expr(expr.end, env)
+            init, init_type = self.compile_expr(expr.init, env)
+            loop_env = TypeEnv(env, {}, {expr.var.text: init_type}, {})
+            loop, loop_type = self.compile_expr(expr.loop, loop_env)
+            self.check_assignable_from_to(init_type, loop_type, "")
+            self.check_assignable_from_to(loop_type, init_type, "")
+            if not isinstance(start, float) and not isinstance(start, int):
+                raise Exception(f"Cannot compile for init {init} = {start}")
+            if not isinstance(end, float) and not isinstance(end, int):
+                raise Exception(f"Cannot compile for init {init} = {end}")
+            ret = init
+            for i in range(int(start), int(end)):
+                ret = LetExpr(
+                    [(expr.index, FloatExpr(i)), (expr.var, ret)],
+                    loop,
+                )
+            return ret, init_type
         else:
             raise NotImplementedError(f"compile_expr not implemented for {type(expr)}")
 
@@ -758,8 +807,6 @@ class Interpreter:
                 return np.matmul(left, right)
             else:
                 raise RuntimeError(f"Unknown binary operator: {expr.op.text}")
-        elif isinstance(expr, MatMulExpr):
-            raise NotImplementedError("MatMulExpr not implemented yet.")
         elif isinstance(expr, VariableExpr):
             val = env.lookup(expr.name.text)
             if val is None:
