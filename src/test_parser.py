@@ -2,6 +2,7 @@ import unittest
 import parse
 import numpy as np
 from typing import Union, Sequence, Optional
+import baseline
 
 
 class ParserTestCase(unittest.TestCase):
@@ -305,9 +306,182 @@ class InterpreterTestCase(unittest.TestCase):
         ],
     )
 
+    """
+    Attention[Q, K, N, V](q:{...,Q,K}, k:{...,N,K}, v:{...,N,V}, mask:{Q,N}) -> {...,Q,V}:
+        return @(Softmax[N]((@(q, Transpose(k)) / Sqrt(K)) + mask), v)
+    """
+    attention_decl = parse.FunctionDeclaration(
+        var("Attention"),
+        [var("Q"), var("K"), var("N"), var("V")],
+        [],
+        [
+            (var("q"), tensor_type(["...", "Q", "K"])),
+            (var("k"), tensor_type(["...", "N", "K"])),
+            (var("v"), tensor_type(["...", "N", "V"])),
+            (var("mask"), tensor_type(["Q", "N"])),
+        ],
+        tensor_type(["...", "Q", "V"]),
+        [
+            parse.ReturnStatement(
+                parse.BinaryExpr(
+                    op("@"),
+                    parse.CallExpr(
+                        parse.VariableExpr(var("Softmax")),
+                        [parse.VariableExpr(var("N"))],
+                        [],
+                        [
+                            parse.BinaryExpr(
+                                op("+"),
+                                parse.BinaryExpr(
+                                    op("/"),
+                                    parse.BinaryExpr(
+                                        op("@"),
+                                        parse.VariableExpr(var("q")),
+                                        parse.CallExpr(
+                                            parse.VariableExpr(var("Transpose")),
+                                            [
+                                                parse.VariableExpr(var("N")),
+                                                parse.VariableExpr(var("K")),
+                                            ],
+                                            [],
+                                            [parse.VariableExpr(var("k"))],
+                                        ),
+                                    ),
+                                    parse.CallExpr(
+                                        parse.VariableExpr(var("Sqrt")),
+                                        [],
+                                        [],
+                                        [parse.VariableExpr(var("K"))],
+                                    ),
+                                ),
+                                parse.VariableExpr(var("mask")),
+                            ),
+                        ],
+                    ),
+                    parse.VariableExpr(var("v")),
+                )
+            ),
+        ],
+    )
+
+    """
+    MHA[H,S,E,K=E/H]|c_attn, c_proj|(x:{S,E}) -> {S,E}:
+        let q, k, v = Linear[E, E*H*3]|c_attn|(x) {S,(3,H,K) -> 3,H,S,K}
+        let causal_mask = (1 - Tri[S]()) * -1e10
+        let out: {H,E} = Attention[S,K,S,K](q, k, v, causal_mask) {H,S,K -> S,(H,K)}   
+        return Linear[S,S]|c_proj|(out)
+    """
+    mha_decl = parse.FunctionDeclaration(
+        var("MHA"),
+        [var("H"), var("S"), var("E"), var("K")],
+        [(var("c_attn"), tensor_type([])), (var("c_proj"), tensor_type([]))],
+        [(var("x"), parse.TensorType([var("S"), var("E")]))],
+        parse.TensorType([var("S"), var("E")]),
+        [
+            parse.LetStatement(
+                [var("q"), var("k"), var("v")],
+                parse.ReshapeExpr(
+                    parse.CallExpr(
+                        parse.VariableExpr(var("Linear")),
+                        [
+                            parse.VariableExpr(var("E")),
+                            parse.BinaryExpr(
+                                op("*"),
+                                parse.VariableExpr(var("E")),
+                                parse.FloatExpr(3.0),
+                            ),
+                        ],
+                        [parse.VariableExpr(var("c_attn"))],
+                        [parse.VariableExpr(var("x"))],
+                    ),
+                    parse.ReshapeTensorShape(
+                        [
+                            var("S"),
+                            parse.ReshapeTensorShape(
+                                [
+                                    parse.Token("NUMBER", "3", 0, 0),
+                                    var("H"),
+                                    var("K"),
+                                ]
+                            ),
+                        ]
+                    ),
+                    parse.ReshapeTensorShape(
+                        [
+                            parse.Token("NUMBER", "3", 0, 0),
+                            var("H"),
+                            var("S"),
+                            var("K"),
+                        ]
+                    ),
+                    {},
+                ),
+            ),
+            parse.LetStatement(
+                [var("causal_mask")],
+                parse.BinaryExpr(
+                    op("*"),
+                    parse.BinaryExpr(
+                        op("-"),
+                        parse.FloatExpr(1.0),
+                        parse.CallExpr(
+                            parse.VariableExpr(var("Tri")),
+                            [parse.VariableExpr(var("S"))],
+                            [],
+                            [],
+                        ),
+                    ),
+                    parse.FloatExpr(-1e10),
+                ),
+            ),
+            parse.LetStatement(
+                [var("out")],
+                parse.ReshapeExpr(
+                    parse.CallExpr(
+                        parse.VariableExpr(var("Attention")),
+                        [
+                            parse.VariableExpr(var("S")),
+                            parse.VariableExpr(var("K")),
+                            parse.VariableExpr(var("S")),
+                            parse.VariableExpr(var("K")),
+                        ],
+                        [],
+                        [
+                            parse.VariableExpr(var("q")),
+                            parse.VariableExpr(var("k")),
+                            parse.VariableExpr(var("v")),
+                            parse.VariableExpr(var("causal_mask")),
+                        ],
+                    ),
+                    parse.ReshapeTensorShape([var("H"), var("S"), var("K")]),
+                    parse.ReshapeTensorShape(
+                        [var("S"), parse.ReshapeTensorShape([var("H"), var("K")])]
+                    ),
+                    {},
+                ),
+            ),
+            parse.ReturnStatement(
+                parse.CallExpr(
+                    parse.VariableExpr(var("Linear")),
+                    [parse.VariableExpr(var("E")), parse.VariableExpr(var("E"))],
+                    [parse.VariableExpr(var("c_proj"))],
+                    [parse.VariableExpr(var("out"))],
+                )
+            ),
+        ],
+    )
+
     built_ins = {
         "Exp": parse.FunctionDeclaration(
             var("Exp"),
+            [],
+            [],
+            [(var("x"), tensor_type(["..."]))],
+            tensor_type(["..."]),
+            None,
+        ),
+        "Sqrt": parse.FunctionDeclaration(
+            var("Sqrt"),
             [],
             [],
             [(var("x"), tensor_type(["..."]))],
@@ -338,10 +512,27 @@ class InterpreterTestCase(unittest.TestCase):
             tensor_type(["..."]),
             None,
         ),
+        "Tri": parse.FunctionDeclaration(
+            var("Tri"),
+            [var("N")],
+            [],
+            [],
+            tensor_type(["N", "N"]),
+            None,
+        ),
+        "Transpose": parse.FunctionDeclaration(
+            var("Transpose"),
+            [var("N"), var("M")],
+            [],
+            [(var("x"), tensor_type(["...", "N", "M"]))],
+            tensor_type(["...", "M", "N"]),
+            None,
+        ),
     }
 
     built_in_impls = {
         "Exp": parse.Func(lambda *static_args: lambda *args: np.exp(args[0])),
+        "Sqrt": parse.Func(lambda *static_args: lambda *args: np.sqrt(args[0])),
         "Max": parse.Func(
             lambda *static_args: lambda *args: np.max(args[0], axis=-1, keepdims=True)
         ),
@@ -349,6 +540,15 @@ class InterpreterTestCase(unittest.TestCase):
             lambda *static_args: lambda *args: np.sum(args[0], axis=-1, keepdims=True)
         ),
         "Tanh": parse.Func(lambda *static_args: lambda *args: np.tanh(args[0])),
+        "Tri": parse.Func(lambda *static_args: lambda *args: np.tri(static_args[0])),
+        "Tri_2": parse.Func(lambda *static_args: lambda *args: np.tri(static_args[0])),
+        "Transpose": parse.Func(
+            lambda *static_args: lambda *args: np.transpose(
+                args[0],
+                list(range(len(args[0].shape) - 2))
+                + [len(args[0].shape) - 1, len(args[0].shape) - 2],
+            )
+        ),
     }
 
     def gelu(self, x: Union[np.ndarray, float]):
@@ -425,7 +625,7 @@ class InterpreterTestCase(unittest.TestCase):
     def test_eval_call_linear(self):
         i = parse.Interpreter()
         c = parse.Compiler()
-        linear_decl, compiledfuncs = c.compile_function(
+        linear_decl = c.compile_function(
             self.linear_decl, [3.0, 4.0], parse.TypeEnv(None, {}, {}, self.built_ins)
         )
         w = np.array(
@@ -444,7 +644,7 @@ class InterpreterTestCase(unittest.TestCase):
         i = parse.Interpreter()
         c = parse.Compiler()
 
-        ffn_decl, compiledfuncs = c.compile_function(
+        ffn_decl = c.compile_function(
             self.ffn_decl,
             [3.0, 1.0],
             parse.TypeEnv(
@@ -484,6 +684,70 @@ class InterpreterTestCase(unittest.TestCase):
         else:
             self.assertIsInstance(ret, np.ndarray)
 
+    def test_eval_call_mha(self):
+        i = parse.Interpreter()
+        c = parse.Compiler()
+
+        """
+        MHA[H=2,S=3,E=4,K=2]||([[2],[3],[4]])
+            Linear[N=4,K=12]
+            Attention[Q=3,K=2,N=3,V=2]
+            Linear[3,3]
+        """
+
+        mha_decl = c.compile_function(
+            self.mha_decl,
+            [2.0, 3.0, 4.0, 2.0],
+            parse.TypeEnv(
+                None,
+                {},
+                {},
+                {
+                    "Gelu": self.gelu_decl,
+                    "Linear": self.linear_decl,
+                    "FFN": self.ffn_decl,
+                    "Attention": self.attention_decl,
+                    "Softmax": self.softmax_decl,
+                    **self.built_ins,
+                },
+            ),
+        )
+        print(f"compiled funcs: {c.funcs.keys()}")
+        w1 = np.ones([4, 12])
+        b1 = np.ones([12])
+        w2 = np.ones([4, 4])
+        b2 = np.ones([4])
+        x = np.array(
+            [[1.0, 2.0, 3.0, 4.0], [5.0, 6.0, 7.0, 8.0], [9.0, 10.0, 11.0, 12.0]]
+        )
+        ret = i.eval_call_expr(
+            mha_decl,
+            [[w1, b1], [w2, b2]],
+            [x],
+            parse.Env(
+                None,
+                {
+                    # "Gelu_2": parse.Func(self.gelu_decl),
+                    # "Linear_1": parse.Func(self.linear_decl),
+                    # "Attention_9": parse.Func(self.attention_decl),
+                    # "Softmax": parse.Func(self.softmax_decl),
+                    # "Linear_3": parse.Func(self.linear_decl),
+                    # "Linear_4": parse.Func(self.linear_decl),
+                    # "Gelu_4": parse.Func(self.gelu_decl),
+                    # "Gelu_6": parse.Func(self.gelu_decl),
+                    **{k: parse.Func(v) for k, v in c.funcs.items()},
+                    **self.built_in_impls,
+                },
+                {k: v.decl() for k, v in self.built_in_impls.items()},
+            ),
+        )
+        # expected = expected = self.gelu(x @ w1 + b1) @ w2 + b2
+        expected = baseline.mha(x, {"w": w1, "b": b1}, {"w": w2, "b": b2}, 2)
+        if isinstance(ret, np.ndarray):
+            np.testing.assert_array_almost_equal(ret, expected)
+        else:
+            self.assertIsInstance(ret, np.ndarray)
+
     def test_eval_call_softmax(self):
         i = parse.Interpreter()
         c = parse.Compiler()
@@ -500,7 +764,7 @@ class InterpreterTestCase(unittest.TestCase):
                 np.array([[0.26894142, 0.73105858], [0.26894142, 0.73105858]]),
             ),
         ]:
-            softmax_decl, compiledfuncs = c.compile_function(
+            softmax_decl = c.compile_function(
                 self.softmax_decl,
                 [np.shape(arr)[-1]],
                 parse.TypeEnv(
@@ -517,7 +781,7 @@ class InterpreterTestCase(unittest.TestCase):
                     "Sum": parse.Func(sum),
                 }
             )
-            for (k, f) in compiledfuncs.items():
+            for (k, f) in c.funcs.items():
                 vars[k] = parse.Func(f)
             ret = i.eval_call_expr(
                 softmax_decl,

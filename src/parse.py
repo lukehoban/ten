@@ -3,8 +3,9 @@ import onnx
 from onnx import helper, shape_inference
 import onnxruntime as ort
 from dataclasses import dataclass
-from typing import Sequence, Optional, Union, Tuple, Dict, Callable
+from typing import Mapping, Sequence, Optional, Union, Tuple, Dict, Callable
 import numpy as np
+import einops
 
 
 @dataclass
@@ -41,8 +42,9 @@ class CallExpr:
 @dataclass
 class ReshapeExpr:
     expr: Expr
-    reshape_from: "TensorType"
-    reshape_to: "TensorType"
+    reshape_from: "ReshapeTensorShape"
+    reshape_to: "ReshapeTensorShape"
+    constraints: Mapping[str, float]
 
 
 @dataclass
@@ -74,6 +76,19 @@ class ReturnStatement:
 @dataclass
 class TensorType:
     dims: Sequence[Token]
+
+
+@dataclass
+class ReshapeTensorShape:
+    """
+    Valid reshape tensor shapes are:
+    * S,(3,H,K)
+    * 3,H,S,K
+    * H,S,K
+    * S,(H,K)
+    """
+
+    dims: Sequence[Union[Token, "ReshapeTensorShape"]]
 
 
 @dataclass
@@ -109,13 +124,22 @@ class TypeEnv:
             return self.parent.lookup_func(name)
         return None
 
-    def lookup(self, name: str) -> Optional[TensorType]:
+    def lookup(self, name: str) -> Optional[Tuple[TensorType, Optional[Value]]]:
         ret = self.static_vars.get(name)
         if ret is not None:
-            raise NotImplementedError("static vars not implemented in typeenv lookup")
+            if isinstance(ret, np.ndarray):
+                return (
+                    TensorType([Token("NUMBER", str(x), 0, 0) for x in ret.shape]),
+                    ret,
+                )
+            elif isinstance(ret, float):
+                # TODO: This seems wrong - probably should remove scalars from Value namespace entirely
+                return TensorType([]), ret
+            else:
+                raise Exception(f"Unexpected static var type {type(ret)}")
         ret = self.vars.get(name)
         if ret is not None:
-            return ret
+            return ret, None
         if self.parent != None:
             return self.parent.lookup(name)
         return None
@@ -131,10 +155,11 @@ class TypeEnv:
 
 class Compiler:
     i = 0
+    funcs: Dict[str, FunctionDeclaration] = {}
 
     def compile_function(
         self, func: FunctionDeclaration, static_args: Sequence[Value], env: TypeEnv
-    ) -> Tuple[FunctionDeclaration, Dict[str, FunctionDeclaration]]:
+    ) -> FunctionDeclaration:
         print(f"compiling {func.name.text}")
         if len(static_args) != len(func.static_args):
             raise Exception(
@@ -156,16 +181,15 @@ class Compiler:
             if func.body is not None
             else None
         )
-        return (
-            FunctionDeclaration(
-                name=func.name,
-                static_args=[],
-                params=params,
-                args=args,
-                ret=ret_type,
-                body=body,
-            ),
-            env.funcs,
+        for k, v in env.funcs.items():
+            self.funcs[k] = v
+        return FunctionDeclaration(
+            name=func.name,
+            static_args=[],
+            params=params,
+            args=args,
+            ret=ret_type,
+            body=body,
         )
 
     def eval_type(self, typ: TensorType, env: TypeEnv) -> TensorType:
@@ -198,7 +222,7 @@ class Compiler:
             if len(statement.variables) == 1:
                 env.vars[statement.variables[0].text] = expr_type
             else:
-                if len(expr_type.dims) < 1 or expr_type.dims[0] != len(
+                if len(expr_type.dims) < 1 or int(float(expr_type.dims[0].text)) != len(
                     statement.variables
                 ):
                     raise Exception("Wrong number of variables in let statement")
@@ -211,7 +235,7 @@ class Compiler:
             )
         elif isinstance(statement, ReturnStatement):
             expr, expr_type = self.compile_expr(statement.expr, env)
-            self.check_assignable_from_to(expr_type, ret_type)
+            self.check_assignable_from_to(expr_type, ret_type, f"return statement")
             return ReturnStatement(expr=expr)
 
         else:
@@ -219,7 +243,9 @@ class Compiler:
                 f"compile_statement not implemented for {type(statement)}"
             )
 
-    def check_assignable_from_to(self, from_type: TensorType, to_type: TensorType):
+    def check_assignable_from_to(
+        self, from_type: TensorType, to_type: TensorType, context: str
+    ):
         """
         ... -> ... IS OK
         ...N -> ... IS OK
@@ -244,12 +270,12 @@ class Compiler:
             to_dims = to_type.dims
         if len(from_dims) != len(to_dims):
             raise Exception(
-                f"Cannot assign from dimensions {from_dims} to dimensions {to_dims}"
+                f"Cannot assign from dimensions {from_dims} to dimensions {to_dims} in {context}"
             )
         for from_dim, to_dim in zip(from_dims, to_dims):
             if from_dim.kind != to_dim.kind and from_dim.text == to_dim.text:
                 raise Exception(
-                    f"Cannot assign from dimensions {from_dims} to dimensions {to_dims}"
+                    f"Cannot assign from dimensions {from_dims} to dimensions {to_dims} in {context}"
                 )
         return
 
@@ -289,7 +315,11 @@ class Compiler:
             t = env.lookup(expr.name.text)
             if t is None:
                 raise Exception(f"Variable {expr.name.text} not found")
-            return expr, t
+            t, v = t
+            if v is None:
+                return expr, t
+            else:
+                return self.constant_value(v), t
         elif isinstance(expr, BinaryExpr):
             left, left_type = self.compile_expr(expr.left, env)
             right, right_type = self.compile_expr(expr.right, env)
@@ -331,9 +361,10 @@ class Compiler:
             if func is None:
                 raise Exception(f"Could not find function {expr.f.name.text}")
             # TODO: Is it okay to ignore the transitively compiled functions?
-            compiled_func, _ = self.compile_function(
-                func, [self.eval_static_expr(e, env) for e in expr.static_args], env
-            )
+            compiled_static_args = [
+                self.eval_static_expr(e, env) for e in expr.static_args
+            ]
+            compiled_func = self.compile_function(func, compiled_static_args, env)
             self.i = self.i + 1
             func_name = f"{compiled_func.name.text}_{self.i}"
             env.funcs[func_name] = compiled_func
@@ -345,21 +376,118 @@ class Compiler:
             for ((x, param_type), (y, arg_type)) in zip(
                 compiled_func.args, compiled_args
             ):
-                self.check_assignable_from_to(arg_type, param_type)
+                self.check_assignable_from_to(
+                    arg_type,
+                    param_type,
+                    f"passing arg {y} to {x.text} of {compiled_func.name.text}",
+                )
             ret_type = self.applied_return_type(
                 compiled_func, [t for (_, t) in compiled_args]
             )
             return (
                 CallExpr(
                     VariableExpr(Token("IDENT", func_name, 0, 0)),
-                    [],
+                    [FloatExpr(a) for a in compiled_static_args],
                     expr.param_args,  # TODO: Compiled?
                     [e for (e, _) in compiled_args],
                 ),
                 ret_type,
             )
+        elif isinstance(expr, ReshapeExpr):
+            inner, inner_type = self.compile_expr(expr.expr, env)
+            ret_type, reshape_from, reshape_to, contraints = self.reshape_type(
+                expr.reshape_from, expr.reshape_to, inner_type, env
+            )
+            # TODO: Need to compile reshape_from and reshape_to?
+            return (
+                ReshapeExpr(inner, expr.reshape_from, expr.reshape_to, contraints),
+                ret_type,
+            )
         else:
             raise NotImplementedError(f"compile_expr not implemented for {type(expr)}")
+
+    def constant_value(self, v: Value) -> Expr:
+        if isinstance(v, float):
+            return FloatExpr(v)
+        else:
+            raise NotImplementedError(f"constant_value not implemented for {type(v)}")
+
+    def reshape_type(
+        self,
+        frm: ReshapeTensorShape,
+        to: ReshapeTensorShape,
+        t: TensorType,
+        env: TypeEnv,
+    ) -> Tuple[TensorType, ReshapeTensorShape, ReshapeTensorShape, Mapping[str, int]]:
+        if len(frm.dims) != len(t.dims):
+            raise Exception(f"Cannot reshape {t} from {frm}: dimensions don't match")
+        constraints: Dict[str, int] = {}
+        compiled_from_dims: Sequence[Union[Token, ReshapeTensorShape]] = []
+        for (from_at_i, t_at_i) in zip(frm.dims, t.dims):
+            if isinstance(from_at_i, Token):
+                dim = self.eval_dim(from_at_i, env)
+                if dim.text != t_at_i.text:
+                    raise Exception(f"Cannot reshape {t} from {frm}: {dim} != {t_at_i}")
+                compiled_from_dims.append(dim)
+                if from_at_i.kind == "IDENT":
+                    constraints[from_at_i.text] = int(float(dim.text))
+            elif isinstance(from_at_i, ReshapeTensorShape):
+                d = int(float(t_at_i.text))
+                compiled_from_inner_dims: Sequence[
+                    Union[Token, ReshapeTensorShape]
+                ] = []
+                for from_d in from_at_i.dims:
+                    if isinstance(from_d, Token):
+                        dim = self.eval_dim(from_d, env)
+                        d = d / int(float(dim.text))
+                        compiled_from_inner_dims.append(dim)
+                        if from_d.kind == "IDENT":
+                            constraints[from_d.text] = int(float(dim.text))
+                    else:
+                        raise NotImplementedError(
+                            f"reshape_type not implemented: {frm}, {to}, {t}"
+                        )
+                if d != 1:
+                    raise Exception(
+                        f"Cannot reshape {t} from {frm}: dimensions don't divide evenly"
+                    )
+                compiled_from_dims.append(ReshapeTensorShape(compiled_from_inner_dims))
+            else:
+                raise NotImplementedError(
+                    f"reshape_type not implemented: {frm}, {to}, {t}"
+                )
+        # TODO: Verify that the to shape is valid for the from shape
+        ret_type_dims = []
+        compiled_to_dims: Sequence[Union[Token, ReshapeTensorShape]] = []
+        for to_d in to.dims:
+            if isinstance(to_d, Token):
+                dim = self.eval_dim(to_d, env)
+                ret_type_dims.append(dim)
+                compiled_to_dims.append(dim)
+            elif isinstance(to_d, ReshapeTensorShape):
+                d = 1
+                compiled_to_inner_dims: Sequence[Union[Token, ReshapeTensorShape]] = []
+                for to_d_inner in to_d.dims:
+                    if isinstance(to_d_inner, Token):
+                        dim = self.eval_dim(to_d_inner, env)
+                        d = d * int(float(dim.text))
+                        compiled_to_inner_dims.append(dim)
+                    else:
+                        raise NotImplementedError(
+                            f"reshape_type not implemented: {frm}, {to}, {t}"
+                        )
+                ret_type_dims.append(Token("NUMBER", str(d), 0, 0))
+                compiled_to_dims.append(ReshapeTensorShape(compiled_to_inner_dims))
+            else:
+                raise NotImplementedError(
+                    f"reshape_type not implemented: {frm}, {to}, {t}"
+                )
+        return (
+            TensorType(ret_type_dims),
+            ReshapeTensorShape(compiled_from_dims),
+            ReshapeTensorShape(compiled_to_dims),
+            constraints,
+        )
 
     def eval_static_expr(self, expr: Expr, env: TypeEnv) -> Value:
         if isinstance(expr, FloatExpr):
@@ -459,7 +587,7 @@ class Interpreter:
             built_in = env.lookup_builtin(name)
             if built_in is None:
                 raise Exception(f"Could not find built-in function {name}")
-            return built_in(args)
+            return built_in(*args)
         param_vars: Dict[str, Value] = {}
         for [(var, var_type), val] in zip(program.params, params):
             param_vars[var.text] = val
@@ -482,7 +610,13 @@ class Interpreter:
             elif len(stmt.variables) == 1:
                 env.vars[stmt.variables[0].text] = result
             else:
-                raise RuntimeError("Too many variables for single value.")
+                if not isinstance(result, np.ndarray):
+                    raise RuntimeError(
+                        f"Cannot assign non-tensor {result} to multi-variable binding {stmt.variables}"
+                    )
+                items = np.split(result, len(stmt.variables))
+                for (var, val) in zip(stmt.variables, items):
+                    env.vars[var.text] = val[0]
             return None
         if isinstance(stmt, ReturnStatement):
             return self.eval_expr(stmt.expr, env)
@@ -511,7 +645,98 @@ class Interpreter:
                 ret = self.eval_call_expr(f.decl, param_args, args, env)
                 return ret
         elif isinstance(expr, ReshapeExpr):
-            raise NotImplementedError("ReshapeExpr not implemented yet.")
+            # (S, (3, H, K)) -> (3, H, S, K)
+            i = 1
+            m: Dict[str, str] = {}
+            vals: Dict[str, int] = {}
+            v = self.eval_expr(expr.expr, env)
+            rearrange_str = ""
+            # TODO: Use Transpose and Reshape instead of einops?
+            for dim in expr.reshape_from.dims:
+                if isinstance(dim, Token):
+                    if dim.kind == "NUMBER":
+                        s = f"x{i}"
+                        i = i + 1
+                        m[dim.text] = s
+                        vals[s] = int(float(dim.text))
+                    elif dim.kind == "IDENT":
+                        # v = env.lookup(dim.text)
+                        # if v is None:
+                        #     raise RuntimeError(f"could not find {dim.text} in scope")
+                        # if not isinstance(v, float):
+                        #     raise RuntimeError(
+                        #         f"variable {dim.text} of non-number type {type(v)} used in dimension"
+                        #     )
+                        # vals[dim.text] = v
+                        s = dim.text
+                    else:
+                        raise RuntimeError("Unknown reshape dimension type.")
+                    rearrange_str += s + " "
+                elif isinstance(dim, ReshapeTensorShape):
+                    rearrange_str += "("
+                    for d in dim.dims:
+                        if isinstance(d, Token):
+                            if d.kind == "NUMBER":
+                                s = f"x{i}"
+                                i = i + 1
+                                m[d.text] = s
+                                vals[s] = int(float(d.text))
+                            elif d.kind == "IDENT":
+                                # v = env.lookup(d.text)
+                                # if v is None:
+                                #     raise RuntimeError(
+                                #         f"could not find {d.text} in scope"
+                                #     )
+                                # if not isinstance(v, float):
+                                #     raise RuntimeError(
+                                #         f"variable {d.text} of non-number type {type(v)} used in dimension"
+                                #     )
+                                # vals[d.text] = v
+                                s = d.text
+                            else:
+                                raise RuntimeError("Unknown reshape dimension type.")
+                            rearrange_str += s + " "
+                        elif isinstance(d, ReshapeTensorShape):
+                            raise RuntimeError(
+                                "Cannot reshape tensors with nested shapes."
+                            )
+                        else:
+                            raise RuntimeError("Unknown reshape dimension type.")
+                    rearrange_str += ") "
+                else:
+                    raise RuntimeError("Unknown reshape dimension type.")
+            rearrange_str += "-> "
+            for dim in expr.reshape_to.dims:
+                if isinstance(dim, Token):
+                    if dim.kind == "NUMBER":
+                        s = m[dim.text]
+                    elif dim.kind == "IDENT":
+                        s = dim.text
+                    else:
+                        raise RuntimeError("Unknown reshape dimension type.")
+                    rearrange_str += s + " "
+                elif isinstance(dim, ReshapeTensorShape):
+                    rearrange_str += "("
+                    for d in dim.dims:
+                        if isinstance(d, Token):
+                            if d.kind == "NUMBER":
+                                s = m[d.text]
+                            elif d.kind == "IDENT":
+                                s = d.text
+                            else:
+                                raise RuntimeError("Unknown reshape dimension type.")
+                            rearrange_str += s + " "
+                        elif isinstance(d, ReshapeTensorShape):
+                            raise RuntimeError(
+                                "Cannot reshape tensors with nested shapes."
+                            )
+                        else:
+                            raise RuntimeError("Unknown reshape dimension type.")
+                    rearrange_str += ") "
+                else:
+                    raise RuntimeError("Unknown reshape dimension type.")
+            print(f"rearrange -> {rearrange_str}")
+            return einops.rearrange(v, rearrange_str, **expr.constraints, **vals)
         elif isinstance(expr, BinaryExpr):
             left = self.eval_expr(expr.left, env)
             right = self.eval_expr(expr.right, env)
