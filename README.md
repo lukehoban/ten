@@ -35,7 +35,7 @@ FFN[S,E]|c_fc, c_proj|(x:{S,E}) -> {S,E}:
     return Linear[E*4,E]|c_proj|(a)
 
 Attention[Q, K, N, V](q:{...,Q,K}, k:{...,N,K}, v:{...,N,V}, mask:{Q,N}) -> {...,Q,V}:
-    return Softmax[N](q @ Transpose(k) / Sqrt(K)) + mask) @ v
+    return Softmax[N](q @ Transpose[K,N](k) / Sqrt(K) + mask) @ v
 
 MHA[H,S,E,K]|c_attn, c_proj|(x:{S,E}) -> {S,E}:
     let q, k, v = Linear[E, E*3]|c_attn|(x) {S,(3,H,K) -> 3,H,S,K}
@@ -50,7 +50,7 @@ Transformer[H,S,E]|mlp, attn, ln_1, ln_2|(x: {S,E}) -> {S, E}:
 GPT2[H,S,E,B,V]|wte, wpe, blocks|(inputs: {S}) -> {S,V}:
     let x = wte[inputs] + wpe[Range[S]()]
     let z = for i in 0..B: x, y => Transformer[H,S,E]|blocks[i]|(y)
-    return @(LayerNorm[S,E]|ln_f|(z), Transpose[V,E](wte))
+    return LayerNorm[S,E]|ln_f|(z) @ Transpose[V,E](wte)
 ```
 
 Running `GPT2[12,10,768,12,50257]|weights from paper|([36235, 39141, 18765, 1143, 326, 9061, 561, 530, 1110, 1716])` using the trained params loaded from the GPT2 paper, and passing in the encoded form of "Alan Turing theorized that computers would one day become", returns a result `ret` for which `argmax(ret[-1])` is `262`, the encoded form of " the".
