@@ -3,3 +3,4 @@ torch
 onnxruntime
 numpy
 einops
+tensorflow-macos

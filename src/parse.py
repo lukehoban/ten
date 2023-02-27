@@ -205,11 +205,9 @@ class Compiler:
             if func.body is not None
             else None
         )
-        for k, v in env.funcs.items():
-            self.funcs[k] = v
         return FunctionDeclaration(
             name=func.name,
-            static_args=[],
+            static_args=func.static_args,
             params=params,
             args=args,
             ret=ret_type,
@@ -392,6 +390,7 @@ class Compiler:
             self.i = self.i + 1
             func_name = f"{compiled_func.name.text}_{self.i}"
             env.funcs[func_name] = compiled_func
+            self.funcs[func_name] = compiled_func
             compiled_args = [self.compile_expr(arg, env) for arg in expr.args]
             if len(compiled_args) != len(compiled_func.args):
                 raise Exception(
@@ -812,6 +811,27 @@ class Interpreter:
             if val is None:
                 raise RuntimeError(f"Variable {expr.name.text} not found.")
             return val
+        elif isinstance(expr, IndexExpr):
+            e = self.eval_expr(expr.expr, env)
+            idx = self.eval_expr(expr.index, env)
+            if isinstance(e, np.ndarray):
+                if isinstance(idx, np.ndarray):
+                    return e[idx.astype(int)]
+                elif isinstance(idx, float):
+                    return e[int(idx)]
+                else:
+                    raise RuntimeError(f"Unknown index type: {type(idx)}")
+            elif isinstance(e, list):
+                if isinstance(idx, float) or isinstance(idx, int):
+                    return e[int(idx)]
+                else:
+                    raise RuntimeError(f"Unknown index type: {type(idx)}")
+            else:
+                raise RuntimeError(f"Unknown array type: {type(e)}")
+        elif isinstance(expr, LetExpr):
+            new_vars = {k.text: self.eval_expr(v, env) for k, v in expr.initializers}
+            env = Env(env, new_vars, {})
+            return self.eval_expr(expr.body, env)
         else:
             raise NotImplementedError(f"Unknown expression type: {expr}")
 

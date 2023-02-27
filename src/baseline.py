@@ -88,3 +88,36 @@ def gpt2(inputs, wte, wpe, blocks, ln_f, n_head):  # [n_seq] -> [n_seq, n_vocab]
     # print(ret.shape)
 
     return ret   # [n_seq, n_embd] -> [n_seq, n_vocab]
+
+import tensorflow as tf
+import re
+
+def load_gpt2_params_from_tf_ckpt(tf_ckpt_path, hparams):
+    def set_in_nested_dict(d, keys, val):
+        if not keys:
+            return val
+        if keys[0] not in d:
+            d[keys[0]] = {}
+        d[keys[0]] = set_in_nested_dict(d[keys[0]], keys[1:], val)
+        return d
+
+    init_vars = tf.train.list_variables(tf_ckpt_path)
+    # print(init_vars)
+    # for name, dims in init_vars:
+    #     print(f"{name}: {dims} - {np.prod(dims)}")
+    params = {"blocks": [{} for _ in range(hparams["n_layer"])]}
+    for name, _ in init_vars:
+        array = np.squeeze(tf.train.load_variable(tf_ckpt_path, name))
+        # print(f"{name} = {array}")
+        name = name.removeprefix("model/")
+        if name.startswith("h"):
+            m = re.match(r"h([0-9]+)/(.*)", name)
+            if m is None:
+                raise Exception("invalid name:" + name)
+            n = int(m[1])
+            sub_name = m[2]
+            set_in_nested_dict(params["blocks"][n], sub_name.split("/"), array)
+        else:
+            set_in_nested_dict(params, name.split("/"), array)
+
+    return params

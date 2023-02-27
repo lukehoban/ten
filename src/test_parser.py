@@ -1,7 +1,7 @@
 import unittest
 import parse
 import numpy as np
-from typing import Union, Sequence, Optional
+from typing import Union, Sequence, Optional, Any
 import baseline
 
 
@@ -577,7 +577,7 @@ class InterpreterTestCase(unittest.TestCase):
                                     parse.VariableExpr(var("S")),
                                     parse.VariableExpr(var("E")),
                                 ],
-                                [],
+                                [parse.VariableExpr(var("ln_1"))],
                                 [parse.VariableExpr(var("x"))],
                             )
                         ],
@@ -599,7 +599,7 @@ class InterpreterTestCase(unittest.TestCase):
                                     parse.VariableExpr(var("S")),
                                     parse.VariableExpr(var("E")),
                                 ],
-                                [],
+                                [parse.VariableExpr(var("ln_2"))],
                                 [parse.VariableExpr(var("y"))],
                             )
                         ],
@@ -622,6 +622,7 @@ class InterpreterTestCase(unittest.TestCase):
             (var("wte"), tensor_type(["V", "E"])),
             (var("wpe"), tensor_type(["S", "E"])),
             (var("blocks"), tensor_type([])),
+            (var("ln_f"), tensor_type([])),
         ],
         [(var("inputs"), parse.TensorType([var("S")]))],
         parse.TensorType([var("S"), var("V")]),
@@ -790,6 +791,7 @@ class InterpreterTestCase(unittest.TestCase):
         "Tanh": parse.Func(lambda *static_args: lambda *args: np.tanh(args[0])),
         "Tri": parse.Func(lambda *static_args: lambda *args: np.tri(static_args[0])),
         "Tri_2": parse.Func(lambda *static_args: lambda *args: np.tri(static_args[0])),
+        "Tri_3": parse.Func(lambda *static_args: lambda *args: np.tri(static_args[0])),
         "Transpose": parse.Func(
             lambda *static_args: lambda *args: np.transpose(
                 args[0],
@@ -798,10 +800,15 @@ class InterpreterTestCase(unittest.TestCase):
             )
         ),
         "Mean": parse.Func(
-            lambda *static_args: lambda *args: np.mean(args[0], axis=-1)
+            lambda *static_args: lambda *args: np.mean(args[0], axis=-1, keepdims=True)
         ),
-        "Var": parse.Func(lambda *static_args: lambda *args: np.var(args[0], axis=-1)),
+        "Var": parse.Func(
+            lambda *static_args: lambda *args: np.var(args[0], axis=-1, keepdims=True)
+        ),
         "Range": parse.Func(
+            lambda *static_args: lambda *args: np.arange(static_args[0])
+        ),
+        "Range_1": parse.Func(
             lambda *static_args: lambda *args: np.arange(static_args[0])
         ),
     }
@@ -943,18 +950,40 @@ class InterpreterTestCase(unittest.TestCase):
         i = parse.Interpreter()
         c = parse.Compiler()
 
-        """
         V = 50257
         C = 1024
         E = 768
         H = 12
         B = 12
-        S = 3
-        """
+        S = 10
+        params: Any = baseline.load_gpt2_params_from_tf_ckpt(
+            "src/model/model.ckpt",
+            {"n_vocab": V, "n_ctx": C, "n_embd": E, "n_head": H, "n_layer": B},
+        )
+        params_arr = [
+            params["wte"],
+            params["wpe"],
+            [
+                [
+                    [
+                        [block["mlp"]["c_fc"]["w"], block["mlp"]["c_fc"]["b"]],
+                        [block["mlp"]["c_proj"]["w"], block["mlp"]["c_proj"]["b"]],
+                    ],
+                    [
+                        [block["attn"]["c_attn"]["w"], block["attn"]["c_attn"]["b"]],
+                        [block["attn"]["c_proj"]["w"], block["attn"]["c_proj"]["b"]],
+                    ],
+                    [block["ln_1"]["g"], block["ln_1"]["b"]],
+                    [block["ln_2"]["g"], block["ln_2"]["b"]],
+                ]
+                for block in params["blocks"]
+            ],
+            [params["ln_f"]["g"], params["ln_f"]["b"]],
+        ]
 
         gpt2_decl = c.compile_function(
             self.gpt2_decl,
-            [12.0, 3.0, 768.0, 12.0, 50257.0],  # H, S, E, B, V
+            [12.0, 10.0, 768.0, 12.0, 50257.0],  # H, S, E, B, V
             parse.TypeEnv(
                 None,
                 {},
@@ -973,7 +1002,29 @@ class InterpreterTestCase(unittest.TestCase):
             ),
         )
         print(f"compiled funcs: {c.funcs.keys()}")
-        self.fail("not implemented interpreter for GPT2")
+
+        # Alan Turing theorized that computers would one day become
+        x = np.array([36235, 39141, 18765, 1143, 326, 9061, 561, 530, 1110, 1716])
+
+        ret = i.eval_call_expr(
+            gpt2_decl,
+            params_arr,
+            [x],
+            parse.Env(
+                None,
+                {
+                    **{k: parse.Func(v) for k, v in c.funcs.items()},
+                    **self.built_in_impls,
+                },
+                {k: v.decl() for k, v in self.built_in_impls.items()},
+            ),
+        )
+        if not isinstance(ret, np.ndarray):
+            self.assertIsInstance(ret, np.ndarray)
+            return
+        self.assertEqual(ret.shape, (10, 50257))
+        next_tok = np.argmax(ret[-1])
+        self.assertEqual(next_tok, 262)  # ' the'
 
     def test_eval_call_mha(self):
         i = parse.Interpreter()
