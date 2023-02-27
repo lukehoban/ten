@@ -1,3 +1,5 @@
+# Copyright 2023 Luke Hoban
+
 import torch
 import onnx
 from onnx import helper, shape_inference

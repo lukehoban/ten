@@ -1,7 +1,5 @@
-import torch
-import onnx
-from onnx import helper, shape_inference
-import onnxruntime as ort
+# Copyright 2023 Luke Hoban
+
 from dataclasses import dataclass
 from typing import Mapping, Sequence, Optional, Union, Tuple, Dict, Callable
 import numpy as np

@@ -1,3 +1,5 @@
+# Copyright 2023 Luke Hoban
+
 import unittest
 import parse
 import numpy as np
