@@ -5,7 +5,7 @@ Ten is a statically typed tensor programming language for defining AI models.
 Ten has the following features:
 * Succint syntax and operators tailored to AI model definition
 * Fully statically typed tensors, including generic functions over tensor dimension and batch dimensions (...)
-* First-class hyper-parameters, model parameters and model arguments
+* First-class hyper-parameters, model parameters and model arguments for explicit model specification
 * EinOps-style reshaping and reductions - tensor dimensions are explicit not implicit
 
 Future:
@@ -27,7 +27,7 @@ LayerNorm[S,E]|g:{E},b:{E}|(x:{S,E}) -> {S,E}:
     variance = Var(x)
     return g * (x - mean) / Sqrt(variance + 1e-5) + b
 
-Linear[N,K]|w:{N,K},b:{K}|(x: {...N}) -> {...K}:
+Linear[N,K]|w:{N,K},b:{K}|(x:{...N}) -> {...K}:
     return x@w + b
 
 FFN[S,E]|c_fc, c_proj|(x:{S,E}) -> {S,E}:
@@ -53,7 +53,7 @@ GPT2[H,S,E,B,V]|wte, wpe, blocks|(inputs:{S}) -> {S,V}:
     return LayerNorm[S,E]|ln_f|(z) @ Transpose[V,E](wte)
 ```
 
-Running `GPT2[12,10,768,12,50257]|weights from paper|([36235, 39141, 18765, 1143, 326, 9061, 561, 530, 1110, 1716])` using the trained params loaded from the GPT2 paper, and passing in the encoded form of "Alan Turing theorized that computers would one day become", returns a result `ret` for which `argmax(ret[-1])` indicates that the most likely next token is `262`, the encoded form of " the".
+Running `GPT2[12,10,768,12,50257]|weights from paper|([464, 1266, 8300, 3303, 329, 16215, 9552, 4981, 318])` using the trained params loaded from the GPT2 124M model from the G    PT2 paper, and passing in the encoded form of "The best programming language for defining AI models is", returns a result `ret` for which `argmax(ret[-1])` indicates that the most likely next token is `11361`, the encoded form of " Python" :-).
 
 ## Implementation Status
 
