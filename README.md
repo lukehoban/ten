@@ -27,7 +27,7 @@ LayerNorm[S,E]|g:{E},b:{E}|(x:{S,E}) -> {S,E}:
     variance = Var(x)
     return g * (x - mean) / Sqrt(variance + 1e-5) + b
 
-Linear[N,K]|w:{N,K},b:{K}|(x:{...N}) -> {...K}:
+Linear[N,K]|w:{N,K},b:{K}|(x:{...,N}) -> {...K}:
     return x@w + b
 
 FFN[S,E]|c_fc, c_proj|(x:{S,E}) -> {S,E}:
@@ -48,8 +48,8 @@ Transformer[H,S,E]|mlp, attn, ln_1, ln_2|(x:{S,E}) -> {S, E}:
     return y + FFN[S,E]|mlp|(LayerNorm[S,E]|ln_2|(y))
 
 GPT2[H,S,E,B,V]|wte, wpe, blocks|(inputs:{S}) -> {S,V}:
-    x = wte[inputs] + wpe[Range[S]()]
-    z = for i in 0..B: x, y => Transformer[H,S,E]|blocks[i]|(y)
+    x = wte.[inputs] + wpe.[Range[S]()]
+    z = for i in 0...B: x, y -> Transformer[H,S,E]|blocks.[i]|(y)
     return LayerNorm[S,E]|ln_f|(z) @ Transpose[V,E](wte)
 ```
 
@@ -57,11 +57,44 @@ Running `GPT2[12,10,768,12,50257]|weights from paper|([464, 1266, 8300, 3303, 32
 
 ## Implementation Status
 
-The current implementation is missing a fully functional parser :-).  Programs are specified as ASTs for testing. Humorously, providing a snippet of Ten like in the example above, and then asking GitHub Copilot to complete the AST creation works incredibly well - so maybe no need for a parser! (j/k)
 
 The current implementation type-checks and compiles, then interprets the Ten program using numpy.  This is obviously innefficient, but very flexible.  It's also largely incompatible with supporting training, which will require a higher-level execution environment.
 
 The goal is to replace this implementation with compilation directly into an ONNX graph, and then run that graph for interpretation (currently inference and in the future perhaps training).
+
+## Grammar
+
+```peg
+Program         <- Function*
+Function        <- Ident ('[' IdentList? ']')? ('|' ParamListOptType? '|')? '(' ParamList? ')' '->' Type (':' Statement+)?
+IdentList       <- Ident (',' Ident)*
+ParamList       <- Param (',' Param)*
+Param           <- Ident ':' Type
+ParamListOptType<- ParamOptType (',' ParamOptType)*
+ParamOptType    <- Ident (':' Type)?
+Type            <- TensorType
+TensorType      <- '{' (Dimension (',' Dimension)*)? '}'
+Dimension       <- Ident / '...' / Number
+Statement       <- ReturnStatement / LetStatement
+ReturnStatement <- 'return' Expr
+LetStatement    <- IdentList '=' Expr
+Expr            <- MaybeSum
+MaybeSum        <- MaybeProduct (('+' / '-') MaybeProduct)*
+MaybeProduct    <- MaybePower (('*' / '/') MaybePower)*
+MaybePower      <- MaybeMatmul ('**' MaybeMatmul)?
+MaybeMatmul     <- MaybeReshape ('@' MaybeReshape)*
+MaybeReshape    <- PrimitiveExpr ('{' ReshapeType '->' ReshapeType '}')?
+PrimitiveExpr   <- ParenExpr / CallExpr / IndexExpr / ForExpr / Ident / Number 
+ParenExpr       <- '(' Expr ')'
+CallExpr        <- Ident ('[' ArgList? ']')? ('|' ArgList? '|')? '(' ArgList? ')'
+ArgList         <- Expr (',' Expr)*
+IndexExpr       <- Ident '.' '[' Expr ']'
+ForExpr         <- 'for' Ident 'in' Expr '...' Expr ':' Expr ',' Ident '->' Expr
+ReshapeType     <- (ReshapeDimension (',' ReshapeDimension)*)?
+ReshapeDimension<- '(' ReshapeType ')' / Ident / Number 
+Ident           <- [A-Za-z][A-Za-z_0-9]*
+Number          <- '-'? [0-9]+ ('.' [0-9]+) ('e' '-'? [0-9]+)?
+```
 
 ## Notes
 

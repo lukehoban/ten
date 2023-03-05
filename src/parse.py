@@ -855,6 +855,8 @@ class Parser:
         ch = self.s[self.pos + i]
         return ch
 
+    ## LEXER
+
     def read_token(self) -> Token:
         if self.peeked_token != None:
             tok = self.peeked_token
@@ -876,17 +878,32 @@ class Parser:
         elif (ch >= "a" and ch <= "z") or (ch >= "A" and ch <= "Z"):
             s = ""
             while ch != None and (
-                (ch >= "a" and ch <= "z") or (ch >= "A" and ch <= "Z")
+                (ch >= "a" and ch <= "z") or (ch >= "A" and ch <= "Z") or (ch >= "0" and ch <= "9") or ch == "_"
             ):
                 s += ch
                 ch = self.get_char()
             self.pos -= 1
             return Token("IDENT", s, p, i)
-        elif (ch >= "0" and ch <= "9") or ch == ".":
+        elif (ch >= "0" and ch <= "9"):
             s = ""
-            while ch != None and ((ch >= "0" and ch <= "9") or ch == "."):
+            seendot = False
+            while ch != None and ((ch >= "0" and ch <= "9") or (ch == "." and not seendot)):
+                if ch == ".":
+                    seendot = True
                 s += ch
                 ch = self.get_char()
+            if s[-1] == ".": # We can't allow a trailing .
+                self.pos -= 1
+                s = s[:-1]
+            if ch == "e" or ch == "E":
+                s += ch
+                ch = self.get_char()
+                if ch == "+" or ch == "-":
+                    s += ch
+                    ch = self.get_char()
+                while ch != None and (ch >= "0" and ch <= "9"):
+                    s += ch
+                    ch = self.get_char()
             self.pos -= 1
             return Token("NUMBER", s, p, i)
         elif (
@@ -896,6 +913,7 @@ class Parser:
             or ch == "}"
             or ch == "["
             or ch == "]"
+            or ch == "|"
             or ch == ","
             or ch == "/"
             or ch == "?"
@@ -907,6 +925,7 @@ class Parser:
             or ch == ">"
             or ch == "<"
             or ch == "@"
+            or ch == "."
         ):
             if ch == "-" and self.peek_char() == ">":
                 self.get_char()
@@ -923,183 +942,296 @@ class Parser:
             if ch == "?" and self.peek_char() == "?":
                 self.get_char()
                 return Token("OP", "??", p, i)
+            if ch == "*" and self.peek_char() == "*":
+                self.get_char()
+                return Token("OP", "**", p, i)
+            if ch == "." and self.peek_char() == ".":
+                self.get_char()
+                if self.peek_char() == ".":
+                    self.get_char()
+                    return Token("OP", "...", p, i)
+                raise NotImplementedError("Only ... is supported")
             return Token("OP", ch, p, i)
         else:
             # TODO:
             # * string
-            # * number
             # * comment
             raise Exception("Unexpected character: " + ch)
 
-    def peek_token(self) -> Optional[Token]:
+    def peek_token(self) -> Token:
         if self.peeked_token == None:
             self.peeked_token = self.read_token()
         return self.peeked_token
 
-    def parse(self) -> Sequence[FunctionDeclaration]:
+    def assert_ident(self, token: Token, id: Optional[str] = None):
+        expected = "IDENT" if id is None else id
+        if token.kind != "IDENT" or (id is not None and token.text != id):
+            raise Exception(f"Expected {expected} found: {token}")
+
+    def assert_op(self, token: Token, op: Optional[str] = None):
+        expected = "OP" if op is None else op
+        if token.kind != "OP" or (op is not None and token.text != op):
+            raise Exception(f"Expected {expected} found: {token}")
+
+    def assert_number(self, token: Token):
+        if token.kind != "NUMBER":
+            raise Exception("Expected NUMBER found: ", token)
+
+    def read_ident(self, id: Optional[str] = None) -> Token:
+        tok = self.read_token()
+        self.assert_ident(tok, id)
+        return tok
+
+    def read_op(self, op: Optional[str] = None) -> Token:
+        tok = self.read_token()
+        self.assert_op(tok, op)
+        return tok
+    
+    def read_number(self) -> Token:
+        tok = self.read_token()
+        self.assert_number(tok)
+        return tok
+
+    def peek_token_is_op(self, op: str) -> bool:
         tok = self.peek_token()
-        if tok is None:
-            raise Exception("Expected IDENT found: EOF")
-        if tok.kind != "IDENT":
-            raise Exception("Expected IDENT found: " + tok.kind)
-        return self.parse_program()
+        return tok.text == op
+
+    def peek_token_is_ident(self, id: Optional[str] = None) -> bool:
+        tok = self.peek_token()
+        return tok.kind == "IDENT" and (id is None or tok.text == id)
+
+    ## PARSER
 
     def parse_program(self) -> Sequence[FunctionDeclaration]:
         functions = []
-        while True:
-            tok = self.peek_token()
-            if tok is None or tok.kind != "IDENT":
-                break
+        while self.peek_token_is_ident():
             functions.append(self.parse_function())
         return functions
 
     def parse_function(self) -> FunctionDeclaration:
-        name = self.read_token()
-        tok = self.read_token()
-        static_args = []
-        while tok.text == "[" or tok.text == ",":
-            tok = self.read_token()
-            if tok == "]":
-                break
-            static_args.append(tok)
-            tok = self.read_token()
-        tok = self.read_token()
-        # TODO: Hyper args
-        args = []
-        while tok.text == "(" or tok.text == ",":
-            tok = self.read_token()
-            if tok == ")":
-                break
-            arg_name = tok
-            tok = self.read_token()
-            if tok.text != ":":
-                raise Exception("Expected : found: ", tok)
-            arg_type = self.parse_tensor_type()
-            tok = self.read_token()
-            args.append((arg_name, arg_type))
-        tok = self.read_token()
-        if tok.text != "->":
-            raise Exception("Expected -> found: ", tok)
+        name = self.read_ident()
+        static_args: list[Token] = []
+        if self.peek_token_is_op("["):
+            self.read_op("[")
+            if self.peek_token_is_ident():
+                static_args = self.parse_ident_list()
+            self.read_op("]")
+        params: list[Tuple[Token, TensorType]] = []
+        if self.peek_token_is_op("|"):
+            self.read_op("|")
+            if self.peek_token_is_ident():
+                params = self.parse_param_list(True)
+            self.read_op("|")
+        args: list[Tuple[Token, TensorType]] = []
+        self.read_op("(")
+        if self.peek_token_is_ident():
+            args = self.parse_param_list()
+        self.read_op(")")
+        self.read_op("->")
         ret = self.parse_tensor_type()
-        tok = self.read_token()
-        if tok.text != ":":
-            raise Exception("Expected : found: ", tok)
+        body: Optional[Sequence[Statement]] = None
+        if self.peek_token_is_op(":"):
+            self.read_op(":")
+            statements = []
+            while self.peek_token().indentation_level > name.indentation_level:
+                statements.append(self.parse_statement())
+            body = statements
+        return FunctionDeclaration(
+            name, static_args, params, args, ret, body
+        )
 
-        statements = []
-        next_tok = self.peek_token()
-        print("next indent", next_tok, name)
-        while (
-            next_tok is not None and next_tok.indentation_level > name.indentation_level
-        ):
-            statements.append(self.parse_statement())
-            next_tok = self.peek_token()
-        return FunctionDeclaration(name, static_args, [], args, ret, statements)
+    def parse_ident_list(self) -> list[Token]:
+        ret = [self.read_ident()]
+        while self.peek_token_is_op(","):
+            self.read_op(",")
+            ret.append(self.read_ident())
+        return ret
+
+    def parse_param_list(self, allow_no_type = False) -> list[Tuple[Token, TensorType]]:
+        ret = [self.parse_param(allow_no_type)]
+        while self.peek_token_is_op(","):
+            self.read_op(",")
+            ret.append(self.parse_param(allow_no_type))
+        return ret
+
+    def parse_param(self, allow_no_type = False) -> Tuple[Token, TensorType]:
+        tok = self.read_ident()
+        if allow_no_type and not self.peek_token_is_op(":"):
+            return (tok, TensorType([]))
+        self.read_op(":")
+        ty = self.parse_tensor_type()
+        return (tok, ty)
 
     def parse_statement(self) -> Statement:
-        next_tok = self.read_token()
-        if next_tok.text == "return":
-            raise Exception("NYI - return")
-        elif next_tok.text == "let":
-            lhs = []
-            while True:
-                tok = self.read_token()
-                if tok.kind != "IDENT":
-                    raise Exception("Expected IDENT found: ", next_tok)
-                lhs.append(tok)
-                tok = self.read_token()
-                if tok.text == "=":
-                    break
-                elif tok.text == ",":
-                    continue
-                else:
-                    raise Exception("Expected = or , found: ", next_tok)
-            rhs = self.parse_expression()
-            return LetStatement(lhs, rhs)
-        else:
-            raise Exception("NYI - STATEMENT")
-        # elif next_tok.text == "[" or next_tok.text == "(":
-        #     if len(lhs) != 1:
-        #         raise Exception("Expected 1 expression in call found: ", len(lhs))
-        #     f = lhs[0]
-        #     tok = self.read_token()
-        #     static_args = []
-        #     while tok.text == "[" or tok.text == ",":
-        #         tok = self.read_token()
-        #         if tok == "]":
-        #             break
-        #         static_args.append(tok)
-        #         tok = self.read_token()
-        #     tok = self.read_token()
-        #     args = []
-        #     while tok.text == "(" or tok.text == ",":
-        #         next_tok = self.peek_token()
-        #         if next_tok == ")":
-        #             self.read_token()
-        #             break
-        #         expr = self.parse_expression()
-        #         args.append(expr)
-        #     return CallExpr(f, static_args, args)
+        if self.peek_token_is_ident("return"):
+            return self.parse_return_statement()
+        return self.parse_let_statement()
+
+    def parse_return_statement(self) -> ReturnStatement:
+        self.read_ident()
+        expr = self.parse_expression()
+        return ReturnStatement(expr)
+    
+    def parse_let_statement(self) -> LetStatement:
+        idents = self.parse_ident_list()
+        self.read_op("=")
+        expr = self.parse_expression()
+        return LetStatement(idents, expr)
 
     def parse_expression(self) -> Expr:
-        return self.parse_maybe_reshape_expression()
-
-    def parse_maybe_reshape_expression(self) -> Expr:
-        expr = self.parse_maybe_call_expression()
+        return self.parse_maybe_sum()
+    
+    def parse_maybe_sum(self) -> Expr:
+        lhs = self.parse_maybe_product()
+        while self.peek_token_is_op("+") or self.peek_token_is_op("-"):
+            op = self.read_op()
+            rhs = self.parse_maybe_product()
+            lhs = BinaryExpr(op, lhs,  rhs)
+        return lhs
+    
+    def parse_maybe_product(self) -> Expr:
+        lhs = self.parse_maybe_power()
+        while self.peek_token_is_op("*") or self.peek_token_is_op("/"):
+            op = self.read_op()
+            rhs = self.parse_maybe_power()
+            lhs = BinaryExpr(op, lhs,  rhs)
+        return lhs
+    
+    def parse_maybe_power(self) -> Expr:
+        lhs = self.parse_maybe_matmul()
+        while self.peek_token_is_op("**"):
+            op = self.read_op("**")
+            rhs = self.parse_maybe_matmul()
+            lhs = BinaryExpr(op, lhs,  rhs)
+        return lhs
+    
+    def parse_maybe_matmul(self) -> Expr:
+        lhs = self.parse_maybe_reshape()
+        while self.peek_token_is_op("@"):
+            op = self.read_op("@")
+            rhs = self.parse_maybe_reshape()
+            lhs = BinaryExpr(op, lhs,  rhs)
+        return lhs
+    
+    def parse_maybe_reshape(self) -> Expr:
+        lhs = self.parse_primitive_expr()
+        while self.peek_token_is_op("{"):
+            self.read_op("{")
+            from_shape = self.parse_reshape_type()
+            self.read_op("->")
+            to_shape = self.parse_reshape_type()
+            self.read_op("}")
+            lhs = ReshapeExpr(lhs, from_shape, to_shape, {})
+        return lhs
+    
+    def parse_primitive_expr(self) -> Expr:
         tok = self.peek_token()
-        if tok is not None and tok.text == "{":
-            self.read_token()
-            shape = self.parse_tensor_type()
-            # TODO: from shape?
-            return ReshapeExpr(expr, shape, shape)
-        return expr
-
-    def parse_maybe_call_expression(self) -> Expr:
-        expr = self.parse_simple_expression()
-        tok = self.peek_token()
-        static_args = []
-        if tok is not None and tok.text == "[":
-            tok = self.read_token()
-            while tok.text == "[" or tok.text == ",":
-                static_arg = self.parse_expression()
-                static_args.append(static_arg)
-                tok = self.read_token()
-            if tok.text != "]":
-                raise Exception("Expected ] found: ", tok)
-        args = []
-        if tok is not None and tok.text == "(":
-            tok = self.read_token()
-            while tok.text == "[" or tok.text == ",":
-                static_arg = self.parse_expression()
-                static_args.append(static_arg)
-                tok = self.read_token()
-            if tok.text != "]":
-                raise Exception("Expected ] found: ", tok)
-            # TODO: Parse param args
-            return CallExpr(expr, static_args, [], args)
-        return expr
-
-    def parse_simple_expression(self) -> Expr:
-        tok = self.peek_token()
-        if tok is None:
-            raise Exception("Expected expression found: EOF")
+        if tok.kind == "OP" and tok.text == "(":
+            return self.parse_paren_expr()
+        elif tok.kind == "IDENT" and tok.text == "for":
+            return self.parse_for_expr()
+        elif tok.kind == "NUMBER":
+            return FloatExpr(float(self.read_number().text))
         elif tok.kind == "IDENT":
-            return self.parse_maybe_reshape_expression()
-        elif tok.text == "[":
-            raise Exception("NYI - mask index?")
-        elif tok.text == "@":
-            raise Exception("NYI - matmul")
-        raise Exception("NYI - expression")
+            # CallExpr / IndexExpr / Ident
+            ident = self.read_ident()
+            tok = self.peek_token()
+            if tok.kind == "OP" and (tok.text == "["  or tok.text == "("): # TODO: What about | ?
+                return self.parse_call_expr(ident)
+            elif tok.kind == "OP" and tok.text == ".":
+                return self.parse_index_expr(ident)
+            else:
+                return VariableExpr(ident)
+        raise Exception("Expected expression, found " + tok.text)
+    
+    def parse_paren_expr(self) -> Expr:
+        self.read_op("(")
+        expr = self.parse_expression()
+        self.read_op(")")
+        return expr
+
+    def parse_call_expr(self, ident: Token) -> Expr:
+        static_args: list[Expr] = []
+        if self.peek_token_is_op("["):
+            self.read_op("[")
+            if not self.peek_token_is_op("]"):
+                static_args = self.parse_arg_list()
+            self.read_op("]")
+        params: list[Expr] = []
+        if self.peek_token_is_op("|"):
+            self.read_op("|")
+            if not self.peek_token_is_op("|"):
+                params = self.parse_arg_list()
+            self.read_op("|")
+        self.read_op("(")
+        args: list[Expr] = []
+        if not self.peek_token_is_op(")"):
+            args = self.parse_arg_list()
+        self.read_op(")")
+        return CallExpr(VariableExpr(ident), static_args, params, args)
+
+    def parse_arg_list(self) -> list[Expr]:
+        ret = [self.parse_expression()]
+        while self.peek_token_is_op(","):
+            self.read_op(",")
+            ret.append(self.parse_expression())
+        return ret
+
+    def parse_index_expr(self, ident: Token) -> Expr:
+        self.read_op(".")
+        self.read_op("[")
+        index = self.parse_expression()
+        self.read_op("]")
+        return IndexExpr(VariableExpr(ident), index)
+
+    def parse_for_expr(self) -> Expr:
+        self.read_ident("for")
+        index = self.read_ident()
+        self.read_ident("in")
+        start = self.parse_expression()
+        self.read_op("...")
+        end = self.parse_expression()
+        self.read_op(":")
+        init = self.parse_expression()
+        self.read_op(",")
+        var = self.read_token()
+        self.read_op("->")
+        loop = self.parse_expression()
+        return ForExpr(index, start, end, init, var, loop)
+
+    def parse_reshape_type(self) -> ReshapeTensorShape:
+        tok = self.peek_token()
+        dims: list[Union[Token, "ReshapeTensorShape"]] = []
+        if tok.kind == "IDENT" or tok.kind == "NUMBER" or (tok.kind == "OP" and tok.text == "("):
+            dims.append(self.parse_reshape_dimension())
+            while self.peek_token_is_op(","):
+                self.read_op(",")
+                dims.append(self.parse_reshape_dimension())
+        return ReshapeTensorShape(dims)
+    
+    def parse_reshape_dimension(self) -> Union[Token, ReshapeTensorShape]:
+        tok = self.read_token()
+        if tok.kind == "IDENT" or tok.kind == "NUMBER":
+            return tok
+        elif tok.kind == "OP" and tok.text == "(":
+            sub = self.parse_reshape_type()
+            self.read_op(")")
+            return sub
+        raise Exception("Expected tensor type dimension, got " + tok.text)
 
     def parse_tensor_type(self) -> TensorType:
-        tok = self.read_token()
-        if tok.text != "{":
-            raise Exception("Expected { found: ", tok)
-        dims = []
-        while True:
-            tok = self.read_token()
-            if tok.text == "}":
-                break
-            if tok.kind != "IDENT":
-                raise Exception("Expected IDENT found: ", tok)
-            dims.append(tok)
+        self.read_op("{")
+        dims: list[Token] = []
+        if not self.peek_token_is_op("}"):
+            dims.append(self.parse_dimension())
+            while self.peek_token_is_op(","):
+                self.read_op(",")
+                dims.append(self.parse_dimension())
+        self.read_op("}")
         return TensorType(dims)
+    
+    def parse_dimension(self) -> Token:
+        tok = self.read_token()
+        if not (tok.kind == "IDENT" or tok.kind == "NUMBER" or (tok.kind == "OP" and tok.text == "...")): 
+            raise Exception("Expected tensor type dimension, got " + tok.text)
+        return tok
