@@ -1,5 +1,5 @@
 __pycache__
 venv
 misc
-src/model
+src/test/model
 .mypy_cache
