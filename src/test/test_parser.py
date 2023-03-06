@@ -1,7 +1,7 @@
 # Copyright 2023 Luke Hoban
 
 import unittest
-from src.ten import ast, parse, compiler
+from src.ten import tenast, parse, compiler
 import numpy as np
 from typing import Union, Sequence, Optional, Any
 import baseline
@@ -107,26 +107,26 @@ class ParserTestCase(unittest.TestCase):
         self.assertEqual(len(funcs), 9)
 
 
-def op(op: str) -> ast.Token:
-    return ast.Token("OP", op, 0, 0)
+def op(op: str) -> tenast.Token:
+    return tenast.Token("OP", op, 0, 0)
 
 
-def var(name: str) -> ast.Token:
-    return ast.Token("IDENT", name, 0, 0)
+def var(name: str) -> tenast.Token:
+    return tenast.Token("IDENT", name, 0, 0)
 
 
-def tensor_type(dims: Sequence[Union[int, str]]) -> ast.TensorType:
-    ret_dims: list[ast.Token] = []
+def tensor_type(dims: Sequence[Union[int, str]]) -> tenast.TensorType:
+    ret_dims: list[tenast.Token] = []
     for d in dims:
         if d == "...":
-            ret_dims.append(ast.Token("OP", "...", 0, 0))
+            ret_dims.append(tenast.Token("OP", "...", 0, 0))
         elif isinstance(d, str):
-            ret_dims.append(ast.Token("IDENT", d, 0, 0))
+            ret_dims.append(tenast.Token("IDENT", d, 0, 0))
         elif isinstance(d, int):
-            ret_dims.append(ast.Token("NUMBER", str(d), 0, 0))
+            ret_dims.append(tenast.Token("NUMBER", str(d), 0, 0))
         else:
             raise ValueError(f"Invalid dimension: {d}")
-    return ast.TensorType(ret_dims)
+    return tenast.TensorType(ret_dims)
 
 
 class CompilerTestCase(unittest.TestCase):
@@ -152,7 +152,7 @@ class CompilerTestCase(unittest.TestCase):
                 self.assertRaises(Exception, comp.applied_return_type, a, b, c)
             else:
                 tr = tensor_type(tr)
-                f = ast.FunctionDeclaration(
+                f = tenast.FunctionDeclaration(
                     var("f"),
                     [],
                     [],
@@ -188,33 +188,33 @@ class CompilerTestCase(unittest.TestCase):
 
 
 class InterpreterTestCase(unittest.TestCase):
-    gelu_expr = ast.BinaryExpr(
+    gelu_expr = tenast.BinaryExpr(
         op("*"),
-        ast.FloatExpr(0.5),
-        ast.BinaryExpr(
+        tenast.FloatExpr(0.5),
+        tenast.BinaryExpr(
             op("*"),
-            ast.VariableExpr(var("x")),
-            ast.BinaryExpr(
+            tenast.VariableExpr(var("x")),
+            tenast.BinaryExpr(
                 op("+"),
-                ast.FloatExpr(1.0),
-                ast.CallExpr(
-                    ast.VariableExpr(var("Tanh")),
+                tenast.FloatExpr(1.0),
+                tenast.CallExpr(
+                    tenast.VariableExpr(var("Tanh")),
                     [],
                     [],
                     [
-                        ast.BinaryExpr(
+                        tenast.BinaryExpr(
                             op("*"),
-                            ast.FloatExpr(0.7978845608),
-                            ast.BinaryExpr(
+                            tenast.FloatExpr(0.7978845608),
+                            tenast.BinaryExpr(
                                 op("+"),
-                                ast.VariableExpr(var("x")),
-                                ast.BinaryExpr(
+                                tenast.VariableExpr(var("x")),
+                                tenast.BinaryExpr(
                                     op("*"),
-                                    ast.FloatExpr(0.044715),
-                                    ast.BinaryExpr(
+                                    tenast.FloatExpr(0.044715),
+                                    tenast.BinaryExpr(
                                         op("**"),
-                                        ast.VariableExpr(var("x")),
-                                        ast.FloatExpr(3.0),
+                                        tenast.VariableExpr(var("x")),
+                                        tenast.FloatExpr(3.0),
                                     ),
                                 ),
                             ),
@@ -224,52 +224,52 @@ class InterpreterTestCase(unittest.TestCase):
             ),
         ),
     )
-    gelu_decl = ast.FunctionDeclaration(
+    gelu_decl = tenast.FunctionDeclaration(
         var("Gelu"),
         [],
         [],
-        [(var("x"), ast.TensorType([op("...")]))],
-        ast.TensorType([op("...")]),
-        [ast.ReturnStatement(gelu_expr)],
+        [(var("x"), tenast.TensorType([op("...")]))],
+        tenast.TensorType([op("...")]),
+        [tenast.ReturnStatement(gelu_expr)],
     )
-    softmax_decl = ast.FunctionDeclaration(
+    softmax_decl = tenast.FunctionDeclaration(
         var("Softmax"),
         [var("N")],
         [],
-        [(var("x"), ast.TensorType([op("..."), var("N")]))],
-        ast.TensorType([op("..."), var("N")]),
+        [(var("x"), tenast.TensorType([op("..."), var("N")]))],
+        tenast.TensorType([op("..."), var("N")]),
         [
-            ast.LetStatement(
+            tenast.LetStatement(
                 [var("exp_x")],
-                ast.CallExpr(
-                    ast.VariableExpr(var("Exp")),
+                tenast.CallExpr(
+                    tenast.VariableExpr(var("Exp")),
                     [],
                     [],
                     [
-                        ast.BinaryExpr(
+                        tenast.BinaryExpr(
                             op("-"),
-                            ast.VariableExpr(var("x")),
-                            ast.CallExpr(
-                                ast.VariableExpr(var("Max")),
+                            tenast.VariableExpr(var("x")),
+                            tenast.CallExpr(
+                                tenast.VariableExpr(var("Max")),
                                 # TODO:[ast.VariableExpr(var("N"))],
                                 [],
                                 [],
-                                [ast.VariableExpr(var("x"))],
+                                [tenast.VariableExpr(var("x"))],
                             ),
                         ),
                     ],
                 ),
             ),
-            ast.ReturnStatement(
-                ast.BinaryExpr(
+            tenast.ReturnStatement(
+                tenast.BinaryExpr(
                     op("/"),
-                    ast.VariableExpr(var("exp_x")),
-                    ast.CallExpr(
-                        ast.VariableExpr(var("Sum")),
+                    tenast.VariableExpr(var("exp_x")),
+                    tenast.CallExpr(
+                        tenast.VariableExpr(var("Sum")),
                         # TODO: [ast.VariableExpr(var("N"))],
                         [],
                         [],
-                        [ast.VariableExpr(var("exp_x"))],
+                        [tenast.VariableExpr(var("exp_x"))],
                     ),
                 ),
             ),
@@ -280,22 +280,22 @@ class InterpreterTestCase(unittest.TestCase):
     Linear[N,K]|w:{N,K},b:{K}|(x: {...N}) -> {...K}:
         return @{...K}(x{...N}, w{N,K}) + b
     """
-    linear_decl = ast.FunctionDeclaration(
+    linear_decl = tenast.FunctionDeclaration(
         var("Linear"),
         [var("N"), var("K")],
         [(var("w"), tensor_type(["N", "K"])), (var("b"), tensor_type(["K"]))],
         [(var("x"), tensor_type(["...", "N"]))],
         tensor_type(["...", "K"]),
         [
-            ast.ReturnStatement(
-                ast.BinaryExpr(
+            tenast.ReturnStatement(
+                tenast.BinaryExpr(
                     op("+"),
-                    ast.BinaryExpr(
+                    tenast.BinaryExpr(
                         op("@"),
-                        ast.VariableExpr(var("x")),
-                        ast.VariableExpr(var("w")),
+                        tenast.VariableExpr(var("x")),
+                        tenast.VariableExpr(var("w")),
                     ),
-                    ast.VariableExpr(var("b")),
+                    tenast.VariableExpr(var("b")),
                 )
             )
         ],
@@ -306,49 +306,49 @@ class InterpreterTestCase(unittest.TestCase):
         let a = Gelu(Linear[E,E*4]|c_fc...|(x))
         return Linear[E*4,E]|c_proj...|(a)
     """
-    ffn_decl = ast.FunctionDeclaration(
+    ffn_decl = tenast.FunctionDeclaration(
         var("FFN"),
         [var("S"), var("E")],
         [(var("c_fc"), tensor_type([])), (var("c_proj"), tensor_type([]))],
-        [(var("x"), ast.TensorType([var("S"), var("E")]))],
-        ast.TensorType([var("S"), var("E")]),
+        [(var("x"), tenast.TensorType([var("S"), var("E")]))],
+        tenast.TensorType([var("S"), var("E")]),
         [
-            ast.LetStatement(
+            tenast.LetStatement(
                 [var("a")],
-                ast.CallExpr(
-                    ast.VariableExpr(var("Gelu")),
+                tenast.CallExpr(
+                    tenast.VariableExpr(var("Gelu")),
                     [],
                     [],
                     [
-                        ast.CallExpr(
-                            ast.VariableExpr(var("Linear")),
+                        tenast.CallExpr(
+                            tenast.VariableExpr(var("Linear")),
                             [
-                                ast.VariableExpr(var("E")),
-                                ast.BinaryExpr(
+                                tenast.VariableExpr(var("E")),
+                                tenast.BinaryExpr(
                                     op("*"),
-                                    ast.VariableExpr(var("E")),
-                                    ast.FloatExpr(4.0),
+                                    tenast.VariableExpr(var("E")),
+                                    tenast.FloatExpr(4.0),
                                 ),
                             ],
-                            [ast.VariableExpr(var("c_fc"))],
-                            [ast.VariableExpr(var("x"))],
+                            [tenast.VariableExpr(var("c_fc"))],
+                            [tenast.VariableExpr(var("x"))],
                         ),
                     ],
                 ),
             ),
-            ast.ReturnStatement(
-                ast.CallExpr(
-                    ast.VariableExpr(var("Linear")),
+            tenast.ReturnStatement(
+                tenast.CallExpr(
+                    tenast.VariableExpr(var("Linear")),
                     [
-                        ast.BinaryExpr(
+                        tenast.BinaryExpr(
                             op("*"),
-                            ast.VariableExpr(var("E")),
-                            ast.FloatExpr(4.0),
+                            tenast.VariableExpr(var("E")),
+                            tenast.FloatExpr(4.0),
                         ),
-                        ast.VariableExpr(var("E")),
+                        tenast.VariableExpr(var("E")),
                     ],
-                    [ast.VariableExpr(var("c_proj"))],
-                    [ast.VariableExpr(var("a"))],
+                    [tenast.VariableExpr(var("c_proj"))],
+                    [tenast.VariableExpr(var("a"))],
                 )
             ),
         ],
@@ -358,7 +358,7 @@ class InterpreterTestCase(unittest.TestCase):
     Attention[Q, K, N, V](q:{...,Q,K}, k:{...,N,K}, v:{...,N,V}, mask:{Q,N}) -> {...,Q,V}:
         return @(Softmax[N]((@(q, Transpose(k)) / Sqrt(K)) + mask), v)
     """
-    attention_decl = ast.FunctionDeclaration(
+    attention_decl = tenast.FunctionDeclaration(
         var("Attention"),
         [var("Q"), var("K"), var("N"), var("V")],
         [],
@@ -370,43 +370,43 @@ class InterpreterTestCase(unittest.TestCase):
         ],
         tensor_type(["...", "Q", "V"]),
         [
-            ast.ReturnStatement(
-                ast.BinaryExpr(
+            tenast.ReturnStatement(
+                tenast.BinaryExpr(
                     op("@"),
-                    ast.CallExpr(
-                        ast.VariableExpr(var("Softmax")),
-                        [ast.VariableExpr(var("N"))],
+                    tenast.CallExpr(
+                        tenast.VariableExpr(var("Softmax")),
+                        [tenast.VariableExpr(var("N"))],
                         [],
                         [
-                            ast.BinaryExpr(
+                            tenast.BinaryExpr(
                                 op("+"),
-                                ast.BinaryExpr(
+                                tenast.BinaryExpr(
                                     op("/"),
-                                    ast.BinaryExpr(
+                                    tenast.BinaryExpr(
                                         op("@"),
-                                        ast.VariableExpr(var("q")),
-                                        ast.CallExpr(
-                                            ast.VariableExpr(var("Transpose")),
+                                        tenast.VariableExpr(var("q")),
+                                        tenast.CallExpr(
+                                            tenast.VariableExpr(var("Transpose")),
                                             [
-                                                ast.VariableExpr(var("N")),
-                                                ast.VariableExpr(var("K")),
+                                                tenast.VariableExpr(var("N")),
+                                                tenast.VariableExpr(var("K")),
                                             ],
                                             [],
-                                            [ast.VariableExpr(var("k"))],
+                                            [tenast.VariableExpr(var("k"))],
                                         ),
                                     ),
-                                    ast.CallExpr(
-                                        ast.VariableExpr(var("Sqrt")),
+                                    tenast.CallExpr(
+                                        tenast.VariableExpr(var("Sqrt")),
                                         [],
                                         [],
-                                        [ast.VariableExpr(var("K"))],
+                                        [tenast.VariableExpr(var("K"))],
                                     ),
                                 ),
-                                ast.VariableExpr(var("mask")),
+                                tenast.VariableExpr(var("mask")),
                             ),
                         ],
                     ),
-                    ast.VariableExpr(var("v")),
+                    tenast.VariableExpr(var("v")),
                 )
             ),
         ],
@@ -419,44 +419,44 @@ class InterpreterTestCase(unittest.TestCase):
         let out: {H,E} = Attention[S,K,S,K](q, k, v, causal_mask) {H,S,K -> S,(H,K)}   
         return Linear[S,S]|c_proj|(out)
     """
-    mha_decl = ast.FunctionDeclaration(
+    mha_decl = tenast.FunctionDeclaration(
         var("MHA"),
         [var("H"), var("S"), var("E"), var("K")],
         [(var("c_attn"), tensor_type([])), (var("c_proj"), tensor_type([]))],
-        [(var("x"), ast.TensorType([var("S"), var("E")]))],
-        ast.TensorType([var("S"), var("E")]),
+        [(var("x"), tenast.TensorType([var("S"), var("E")]))],
+        tenast.TensorType([var("S"), var("E")]),
         [
-            ast.LetStatement(
+            tenast.LetStatement(
                 [var("q"), var("k"), var("v")],
-                ast.ReshapeExpr(
-                    ast.CallExpr(
-                        ast.VariableExpr(var("Linear")),
+                tenast.ReshapeExpr(
+                    tenast.CallExpr(
+                        tenast.VariableExpr(var("Linear")),
                         [
-                            ast.VariableExpr(var("E")),
-                            ast.BinaryExpr(
+                            tenast.VariableExpr(var("E")),
+                            tenast.BinaryExpr(
                                 op("*"),
-                                ast.VariableExpr(var("E")),
-                                ast.FloatExpr(3.0),
+                                tenast.VariableExpr(var("E")),
+                                tenast.FloatExpr(3.0),
                             ),
                         ],
-                        [ast.VariableExpr(var("c_attn"))],
-                        [ast.VariableExpr(var("x"))],
+                        [tenast.VariableExpr(var("c_attn"))],
+                        [tenast.VariableExpr(var("x"))],
                     ),
-                    ast.ReshapeTensorShape(
+                    tenast.ReshapeTensorShape(
                         [
                             var("S"),
-                            ast.ReshapeTensorShape(
+                            tenast.ReshapeTensorShape(
                                 [
-                                    ast.Token("NUMBER", "3", 0, 0),
+                                    tenast.Token("NUMBER", "3", 0, 0),
                                     var("H"),
                                     var("K"),
                                 ]
                             ),
                         ]
                     ),
-                    ast.ReshapeTensorShape(
+                    tenast.ReshapeTensorShape(
                         [
-                            ast.Token("NUMBER", "3", 0, 0),
+                            tenast.Token("NUMBER", "3", 0, 0),
                             var("H"),
                             var("S"),
                             var("K"),
@@ -465,55 +465,55 @@ class InterpreterTestCase(unittest.TestCase):
                     {},
                 ),
             ),
-            ast.LetStatement(
+            tenast.LetStatement(
                 [var("causal_mask")],
-                ast.BinaryExpr(
+                tenast.BinaryExpr(
                     op("*"),
-                    ast.BinaryExpr(
+                    tenast.BinaryExpr(
                         op("-"),
-                        ast.FloatExpr(1.0),
-                        ast.CallExpr(
-                            ast.VariableExpr(var("Tri")),
-                            [ast.VariableExpr(var("S"))],
+                        tenast.FloatExpr(1.0),
+                        tenast.CallExpr(
+                            tenast.VariableExpr(var("Tri")),
+                            [tenast.VariableExpr(var("S"))],
                             [],
                             [],
                         ),
                     ),
-                    ast.FloatExpr(-1e10),
+                    tenast.FloatExpr(-1e10),
                 ),
             ),
-            ast.LetStatement(
+            tenast.LetStatement(
                 [var("out")],
-                ast.ReshapeExpr(
-                    ast.CallExpr(
-                        ast.VariableExpr(var("Attention")),
+                tenast.ReshapeExpr(
+                    tenast.CallExpr(
+                        tenast.VariableExpr(var("Attention")),
                         [
-                            ast.VariableExpr(var("S")),
-                            ast.VariableExpr(var("K")),
-                            ast.VariableExpr(var("S")),
-                            ast.VariableExpr(var("K")),
+                            tenast.VariableExpr(var("S")),
+                            tenast.VariableExpr(var("K")),
+                            tenast.VariableExpr(var("S")),
+                            tenast.VariableExpr(var("K")),
                         ],
                         [],
                         [
-                            ast.VariableExpr(var("q")),
-                            ast.VariableExpr(var("k")),
-                            ast.VariableExpr(var("v")),
-                            ast.VariableExpr(var("causal_mask")),
+                            tenast.VariableExpr(var("q")),
+                            tenast.VariableExpr(var("k")),
+                            tenast.VariableExpr(var("v")),
+                            tenast.VariableExpr(var("causal_mask")),
                         ],
                     ),
-                    ast.ReshapeTensorShape([var("H"), var("S"), var("K")]),
-                    ast.ReshapeTensorShape(
-                        [var("S"), ast.ReshapeTensorShape([var("H"), var("K")])]
+                    tenast.ReshapeTensorShape([var("H"), var("S"), var("K")]),
+                    tenast.ReshapeTensorShape(
+                        [var("S"), tenast.ReshapeTensorShape([var("H"), var("K")])]
                     ),
                     {},
                 ),
             ),
-            ast.ReturnStatement(
-                ast.CallExpr(
-                    ast.VariableExpr(var("Linear")),
-                    [ast.VariableExpr(var("E")), ast.VariableExpr(var("E"))],
-                    [ast.VariableExpr(var("c_proj"))],
-                    [ast.VariableExpr(var("out"))],
+            tenast.ReturnStatement(
+                tenast.CallExpr(
+                    tenast.VariableExpr(var("Linear")),
+                    [tenast.VariableExpr(var("E")), tenast.VariableExpr(var("E"))],
+                    [tenast.VariableExpr(var("c_proj"))],
+                    [tenast.VariableExpr(var("out"))],
                 )
             ),
         ],
@@ -525,59 +525,59 @@ class InterpreterTestCase(unittest.TestCase):
         let variance = Var(x)
         return g * (x - mean) / Sqrt(variance + 1e-5) + b
     """
-    layernorm_decl = ast.FunctionDeclaration(
+    layernorm_decl = tenast.FunctionDeclaration(
         var("LayerNorm"),
         [var("S"), var("E")],
         [(var("g"), tensor_type(["E"])), (var("b"), tensor_type(["E"]))],
-        [(var("x"), ast.TensorType([var("S"), var("E")]))],
-        ast.TensorType([var("S"), var("E")]),
+        [(var("x"), tenast.TensorType([var("S"), var("E")]))],
+        tenast.TensorType([var("S"), var("E")]),
         [
-            ast.LetStatement(
+            tenast.LetStatement(
                 [var("mean")],
-                ast.CallExpr(
-                    ast.VariableExpr(var("Mean")),
+                tenast.CallExpr(
+                    tenast.VariableExpr(var("Mean")),
                     [],
                     [],
-                    [ast.VariableExpr(var("x"))],
+                    [tenast.VariableExpr(var("x"))],
                 ),
             ),
-            ast.LetStatement(
+            tenast.LetStatement(
                 [var("variance")],
-                ast.CallExpr(
-                    ast.VariableExpr(var("Var")),
+                tenast.CallExpr(
+                    tenast.VariableExpr(var("Var")),
                     [],
                     [],
-                    [ast.VariableExpr(var("x"))],
+                    [tenast.VariableExpr(var("x"))],
                 ),
             ),
-            ast.ReturnStatement(
-                ast.BinaryExpr(
+            tenast.ReturnStatement(
+                tenast.BinaryExpr(
                     op("+"),
-                    ast.BinaryExpr(
+                    tenast.BinaryExpr(
                         op("*"),
-                        ast.VariableExpr(var("g")),
-                        ast.BinaryExpr(
+                        tenast.VariableExpr(var("g")),
+                        tenast.BinaryExpr(
                             op("/"),
-                            ast.BinaryExpr(
+                            tenast.BinaryExpr(
                                 op("-"),
-                                ast.VariableExpr(var("x")),
-                                ast.VariableExpr(var("mean")),
+                                tenast.VariableExpr(var("x")),
+                                tenast.VariableExpr(var("mean")),
                             ),
-                            ast.CallExpr(
-                                ast.VariableExpr(var("Sqrt")),
+                            tenast.CallExpr(
+                                tenast.VariableExpr(var("Sqrt")),
                                 [],
                                 [],
                                 [
-                                    ast.BinaryExpr(
+                                    tenast.BinaryExpr(
                                         op("+"),
-                                        ast.VariableExpr(var("variance")),
-                                        ast.FloatExpr(1e-5),
+                                        tenast.VariableExpr(var("variance")),
+                                        tenast.FloatExpr(1e-5),
                                     )
                                 ],
                             ),
                         ),
                     ),
-                    ast.VariableExpr(var("b")),
+                    tenast.VariableExpr(var("b")),
                 )
             ),
         ],
@@ -588,7 +588,7 @@ class InterpreterTestCase(unittest.TestCase):
         let y = x + MHA[H,S,E,E/H]|attn|(LayerNorm[]|ln_1|(x))
         return y + FFN[S,E]|mlp|(LayerNorm[]|ln_2|(y))    
     """
-    transformer_decl = ast.FunctionDeclaration(
+    transformer_decl = tenast.FunctionDeclaration(
         var("Transformer"),
         [var("H"), var("S"), var("E")],
         [
@@ -597,58 +597,58 @@ class InterpreterTestCase(unittest.TestCase):
             (var("ln_1"), tensor_type([])),
             (var("ln_2"), tensor_type([])),
         ],
-        [(var("x"), ast.TensorType([var("S"), var("E")]))],
-        ast.TensorType([var("S"), var("E")]),
+        [(var("x"), tenast.TensorType([var("S"), var("E")]))],
+        tenast.TensorType([var("S"), var("E")]),
         [
-            ast.LetStatement(
+            tenast.LetStatement(
                 [var("y")],
-                ast.BinaryExpr(
+                tenast.BinaryExpr(
                     op("+"),
-                    ast.VariableExpr(var("x")),
-                    ast.CallExpr(
-                        ast.VariableExpr(var("MHA")),
+                    tenast.VariableExpr(var("x")),
+                    tenast.CallExpr(
+                        tenast.VariableExpr(var("MHA")),
                         [
-                            ast.VariableExpr(var("H")),
-                            ast.VariableExpr(var("S")),
-                            ast.VariableExpr(var("E")),
-                            ast.BinaryExpr(
+                            tenast.VariableExpr(var("H")),
+                            tenast.VariableExpr(var("S")),
+                            tenast.VariableExpr(var("E")),
+                            tenast.BinaryExpr(
                                 op("/"),
-                                ast.VariableExpr(var("E")),
-                                ast.VariableExpr(var("H")),
+                                tenast.VariableExpr(var("E")),
+                                tenast.VariableExpr(var("H")),
                             ),
                         ],
-                        [ast.VariableExpr(var("attn"))],
+                        [tenast.VariableExpr(var("attn"))],
                         [
-                            ast.CallExpr(
-                                ast.VariableExpr(var("LayerNorm")),
+                            tenast.CallExpr(
+                                tenast.VariableExpr(var("LayerNorm")),
                                 [
-                                    ast.VariableExpr(var("S")),
-                                    ast.VariableExpr(var("E")),
+                                    tenast.VariableExpr(var("S")),
+                                    tenast.VariableExpr(var("E")),
                                 ],
-                                [ast.VariableExpr(var("ln_1"))],
-                                [ast.VariableExpr(var("x"))],
+                                [tenast.VariableExpr(var("ln_1"))],
+                                [tenast.VariableExpr(var("x"))],
                             )
                         ],
                     ),
                 ),
             ),
-            ast.ReturnStatement(
-                ast.BinaryExpr(
+            tenast.ReturnStatement(
+                tenast.BinaryExpr(
                     op("+"),
-                    ast.VariableExpr(var("y")),
-                    ast.CallExpr(
-                        ast.VariableExpr(var("FFN")),
-                        [ast.VariableExpr(var("S")), ast.VariableExpr(var("E"))],
-                        [ast.VariableExpr(var("mlp"))],
+                    tenast.VariableExpr(var("y")),
+                    tenast.CallExpr(
+                        tenast.VariableExpr(var("FFN")),
+                        [tenast.VariableExpr(var("S")), tenast.VariableExpr(var("E"))],
+                        [tenast.VariableExpr(var("mlp"))],
                         [
-                            ast.CallExpr(
-                                ast.VariableExpr(var("LayerNorm")),
+                            tenast.CallExpr(
+                                tenast.VariableExpr(var("LayerNorm")),
                                 [
-                                    ast.VariableExpr(var("S")),
-                                    ast.VariableExpr(var("E")),
+                                    tenast.VariableExpr(var("S")),
+                                    tenast.VariableExpr(var("E")),
                                 ],
-                                [ast.VariableExpr(var("ln_2"))],
-                                [ast.VariableExpr(var("y"))],
+                                [tenast.VariableExpr(var("ln_2"))],
+                                [tenast.VariableExpr(var("y"))],
                             )
                         ],
                     ),
@@ -663,7 +663,7 @@ class InterpreterTestCase(unittest.TestCase):
         let z = for i in 0..B: x, y => Transformer[H]|blocks[i]|(y)
         return @(LayerNorm[S,E]|ln_f|(x), Transpose(wte))
     """
-    gpt2_decl = ast.FunctionDeclaration(
+    gpt2_decl = tenast.FunctionDeclaration(
         var("GPT2"),
         [var("H"), var("S"), var("E"), var("B"), var("V")],
         [
@@ -672,72 +672,72 @@ class InterpreterTestCase(unittest.TestCase):
             (var("blocks"), tensor_type([])),
             (var("ln_f"), tensor_type([])),
         ],
-        [(var("inputs"), ast.TensorType([var("S")]))],
-        ast.TensorType([var("S"), var("V")]),
+        [(var("inputs"), tenast.TensorType([var("S")]))],
+        tenast.TensorType([var("S"), var("V")]),
         [
-            ast.LetStatement(
+            tenast.LetStatement(
                 [var("x")],
-                ast.BinaryExpr(
+                tenast.BinaryExpr(
                     op("+"),
-                    ast.IndexExpr(
-                        ast.VariableExpr(var("wte")),
-                        ast.VariableExpr(var("inputs")),
+                    tenast.IndexExpr(
+                        tenast.VariableExpr(var("wte")),
+                        tenast.VariableExpr(var("inputs")),
                     ),
-                    ast.IndexExpr(
-                        ast.VariableExpr(var("wpe")),
-                        ast.CallExpr(
-                            ast.VariableExpr(var("Range")),
-                            [ast.VariableExpr(var("S"))],
+                    tenast.IndexExpr(
+                        tenast.VariableExpr(var("wpe")),
+                        tenast.CallExpr(
+                            tenast.VariableExpr(var("Range")),
+                            [tenast.VariableExpr(var("S"))],
                             [],
                             [],
                         ),
                     ),
                 ),
             ),
-            ast.LetStatement(
+            tenast.LetStatement(
                 [var("z")],
-                ast.ForExpr(
+                tenast.ForExpr(
                     var("i"),
-                    ast.FloatExpr(0),
-                    ast.VariableExpr(var("B")),
-                    ast.VariableExpr(var("x")),
+                    tenast.FloatExpr(0),
+                    tenast.VariableExpr(var("B")),
+                    tenast.VariableExpr(var("x")),
                     var("y"),
-                    ast.CallExpr(
-                        ast.VariableExpr(var("Transformer")),
+                    tenast.CallExpr(
+                        tenast.VariableExpr(var("Transformer")),
                         [
-                            ast.VariableExpr(var("H")),
-                            ast.VariableExpr(var("S")),
-                            ast.VariableExpr(var("E")),
+                            tenast.VariableExpr(var("H")),
+                            tenast.VariableExpr(var("S")),
+                            tenast.VariableExpr(var("E")),
                         ],
                         [
-                            ast.IndexExpr(
-                                ast.VariableExpr(var("blocks")),
-                                ast.VariableExpr(var("i")),
+                            tenast.IndexExpr(
+                                tenast.VariableExpr(var("blocks")),
+                                tenast.VariableExpr(var("i")),
                             )
                         ],
-                        [ast.VariableExpr(var("y"))],
+                        [tenast.VariableExpr(var("y"))],
                     ),
                 ),
             ),
-            ast.ReturnStatement(
-                ast.BinaryExpr(
+            tenast.ReturnStatement(
+                tenast.BinaryExpr(
                     op("@"),
-                    ast.CallExpr(
-                        ast.VariableExpr(var("LayerNorm")),
-                        [ast.VariableExpr(var("S")), ast.VariableExpr(var("E"))],
-                        [ast.VariableExpr(var("ln_f"))],
+                    tenast.CallExpr(
+                        tenast.VariableExpr(var("LayerNorm")),
+                        [tenast.VariableExpr(var("S")), tenast.VariableExpr(var("E"))],
+                        [tenast.VariableExpr(var("ln_f"))],
                         [
-                            ast.VariableExpr(var("z")),
+                            tenast.VariableExpr(var("z")),
                         ],
                     ),
-                    ast.CallExpr(
-                        ast.VariableExpr(var("Transpose")),
+                    tenast.CallExpr(
+                        tenast.VariableExpr(var("Transpose")),
                         [
-                            ast.VariableExpr(var("V")),
-                            ast.VariableExpr(var("E")),
+                            tenast.VariableExpr(var("V")),
+                            tenast.VariableExpr(var("E")),
                         ],
                         [],
-                        [ast.VariableExpr(var("wte"))],
+                        [tenast.VariableExpr(var("wte"))],
                     ),
                 ),
             ),
@@ -745,7 +745,7 @@ class InterpreterTestCase(unittest.TestCase):
     )
 
     built_ins = {
-        "Exp": ast.FunctionDeclaration(
+        "Exp": tenast.FunctionDeclaration(
             var("Exp"),
             [],
             [],
@@ -753,7 +753,7 @@ class InterpreterTestCase(unittest.TestCase):
             tensor_type(["..."]),
             None,
         ),
-        "Sqrt": ast.FunctionDeclaration(
+        "Sqrt": tenast.FunctionDeclaration(
             var("Sqrt"),
             [],
             [],
@@ -761,7 +761,7 @@ class InterpreterTestCase(unittest.TestCase):
             tensor_type(["..."]),
             None,
         ),
-        "Max": ast.FunctionDeclaration(
+        "Max": tenast.FunctionDeclaration(
             var("Max"),
             [],
             [],
@@ -769,7 +769,7 @@ class InterpreterTestCase(unittest.TestCase):
             tensor_type(["..."]),
             None,
         ),
-        "Sum": ast.FunctionDeclaration(
+        "Sum": tenast.FunctionDeclaration(
             var("Sum"),
             [],
             [],
@@ -777,7 +777,7 @@ class InterpreterTestCase(unittest.TestCase):
             tensor_type(["..."]),
             None,
         ),
-        "Tanh": ast.FunctionDeclaration(
+        "Tanh": tenast.FunctionDeclaration(
             var("Tanh"),
             [],
             [],
@@ -785,7 +785,7 @@ class InterpreterTestCase(unittest.TestCase):
             tensor_type(["..."]),
             None,
         ),
-        "Tri": ast.FunctionDeclaration(
+        "Tri": tenast.FunctionDeclaration(
             var("Tri"),
             [var("N")],
             [],
@@ -793,7 +793,7 @@ class InterpreterTestCase(unittest.TestCase):
             tensor_type(["N", "N"]),
             None,
         ),
-        "Transpose": ast.FunctionDeclaration(
+        "Transpose": tenast.FunctionDeclaration(
             var("Transpose"),
             [var("N"), var("M")],
             [],
@@ -801,7 +801,7 @@ class InterpreterTestCase(unittest.TestCase):
             tensor_type(["...", "M", "N"]),
             None,
         ),
-        "Mean": ast.FunctionDeclaration(
+        "Mean": tenast.FunctionDeclaration(
             var("Mean"),
             [],
             [],
@@ -809,7 +809,7 @@ class InterpreterTestCase(unittest.TestCase):
             tensor_type(["..."]),
             None,
         ),
-        "Var": ast.FunctionDeclaration(
+        "Var": tenast.FunctionDeclaration(
             var("Var"),
             [],
             [],
@@ -817,12 +817,12 @@ class InterpreterTestCase(unittest.TestCase):
             tensor_type(["..."]),
             None,
         ),
-        "Range": ast.FunctionDeclaration(
+        "Range": tenast.FunctionDeclaration(
             var("Range"),
             [var("N")],
             [],
             [],
-            ast.TensorType([var("N")]),
+            tenast.TensorType([var("N")]),
             None,
         ),
     }
@@ -892,8 +892,8 @@ class InterpreterTestCase(unittest.TestCase):
         i = compiler.Interpreter()
         c = compiler.Compiler()
         tanh = lambda *static_args: lambda *args: np.tanh(args[0])
-        expr = lambda x: ast.CallExpr(
-            ast.VariableExpr(var("Gelu")), [], [], [ast.FloatExpr(x)]
+        expr = lambda x: tenast.CallExpr(
+            tenast.VariableExpr(var("Gelu")), [], [], [tenast.FloatExpr(x)]
         )
         for x in [-1.0, 0.0, 1.0]:
             exp, _ = c.compile_expr(
@@ -903,13 +903,13 @@ class InterpreterTestCase(unittest.TestCase):
                     {},
                     {},
                     {
-                        "Gelu": ast.FunctionDeclaration(
+                        "Gelu": tenast.FunctionDeclaration(
                             var("Gelu"),
                             [],
                             [],
-                            [(var("x"), ast.TensorType([op("...")]))],
-                            ast.TensorType([op("...")]),
-                            [ast.ReturnStatement(self.gelu_expr)],
+                            [(var("x"), tenast.TensorType([op("...")]))],
+                            tenast.TensorType([op("...")]),
+                            [tenast.ReturnStatement(self.gelu_expr)],
                         ),
                         **self.built_ins,
                     },

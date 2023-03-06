@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from typing import Mapping, Sequence, Optional, Union, Tuple, Dict, Callable
 import numpy as np
 import einops
-from .ast import (
+from .tenast import (
     FunctionDeclaration,
     Token,
     Statement,

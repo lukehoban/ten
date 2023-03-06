@@ -1,13 +1,13 @@
 # Copyright 2023 Luke Hoban
 
 from typing import Sequence, Optional, Union, Tuple
-from . import ast
+from . import tenast
 
 
 class Parser:
     s: str
     pos: int
-    peeked_token: Optional[ast.Token] = None
+    peeked_token: Optional[tenast.Token] = None
     indentation_level: int = 0
 
     def __init__(self, s: str):
@@ -27,7 +27,7 @@ class Parser:
 
     ## LEXER
 
-    def read_token(self) -> ast.Token:
+    def read_token(self) -> tenast.Token:
         if self.peeked_token != None:
             tok = self.peeked_token
             self.peeked_token = None
@@ -44,7 +44,7 @@ class Parser:
         p = self.pos
         i = self.indentation_level
         if ch == None:
-            return ast.Token("EOF", "", p, i)
+            return tenast.Token("EOF", "", p, i)
         elif (ch >= "a" and ch <= "z") or (ch >= "A" and ch <= "Z"):
             s = ""
             while ch != None and (
@@ -56,7 +56,7 @@ class Parser:
                 s += ch
                 ch = self.get_char()
             self.pos -= 1
-            return ast.Token("IDENT", s, p, i)
+            return tenast.Token("IDENT", s, p, i)
         elif ch >= "0" and ch <= "9":
             s = ""
             seendot = False
@@ -80,7 +80,7 @@ class Parser:
                     s += ch
                     ch = self.get_char()
             self.pos -= 1
-            return ast.Token("NUMBER", s, p, i)
+            return tenast.Token("NUMBER", s, p, i)
         elif (
             ch == "("
             or ch == ")"
@@ -104,65 +104,65 @@ class Parser:
         ):
             if ch == "-" and self.peek_char() == ">":
                 self.get_char()
-                return ast.Token("OP", "->", p, i)
+                return tenast.Token("OP", "->", p, i)
             if ch == "=" and self.peek_char() == ">":
                 self.get_char()
-                return ast.Token("OP", "=>", p, i)
+                return tenast.Token("OP", "=>", p, i)
             if ch == "<" and self.peek_char() == "=":
                 self.get_char()
-                return ast.Token("OP", "<=", p, i)
+                return tenast.Token("OP", "<=", p, i)
             if ch == ">" and self.peek_char() == "=":
                 self.get_char()
-                return ast.Token("OP", ">=", p, i)
+                return tenast.Token("OP", ">=", p, i)
             if ch == "?" and self.peek_char() == "?":
                 self.get_char()
-                return ast.Token("OP", "??", p, i)
+                return tenast.Token("OP", "??", p, i)
             if ch == "*" and self.peek_char() == "*":
                 self.get_char()
-                return ast.Token("OP", "**", p, i)
+                return tenast.Token("OP", "**", p, i)
             if ch == "." and self.peek_char() == ".":
                 self.get_char()
                 if self.peek_char() == ".":
                     self.get_char()
-                    return ast.Token("OP", "...", p, i)
+                    return tenast.Token("OP", "...", p, i)
                 raise NotImplementedError("Only ... is supported")
-            return ast.Token("OP", ch, p, i)
+            return tenast.Token("OP", ch, p, i)
         else:
             # TODO:
             # * string
             # * comment
             raise Exception("Unexpected character: " + ch)
 
-    def peek_token(self) -> ast.Token:
+    def peek_token(self) -> tenast.Token:
         if self.peeked_token == None:
             self.peeked_token = self.read_token()
         return self.peeked_token
 
-    def assert_ident(self, token: ast.Token, id: Optional[str] = None):
+    def assert_ident(self, token: tenast.Token, id: Optional[str] = None):
         expected = "IDENT" if id is None else id
         if token.kind != "IDENT" or (id is not None and token.text != id):
             raise Exception(f"Expected {expected} found: {token}")
 
-    def assert_op(self, token: ast.Token, op: Optional[str] = None):
+    def assert_op(self, token: tenast.Token, op: Optional[str] = None):
         expected = "OP" if op is None else op
         if token.kind != "OP" or (op is not None and token.text != op):
             raise Exception(f"Expected {expected} found: {token}")
 
-    def assert_number(self, token: ast.Token):
+    def assert_number(self, token: tenast.Token):
         if token.kind != "NUMBER":
             raise Exception("Expected NUMBER found: ", token)
 
-    def read_ident(self, id: Optional[str] = None) -> ast.Token:
+    def read_ident(self, id: Optional[str] = None) -> tenast.Token:
         tok = self.read_token()
         self.assert_ident(tok, id)
         return tok
 
-    def read_op(self, op: Optional[str] = None) -> ast.Token:
+    def read_op(self, op: Optional[str] = None) -> tenast.Token:
         tok = self.read_token()
         self.assert_op(tok, op)
         return tok
 
-    def read_number(self) -> ast.Token:
+    def read_number(self) -> tenast.Token:
         tok = self.read_token()
         self.assert_number(tok)
         return tok
@@ -177,43 +177,43 @@ class Parser:
 
     ## PARSER
 
-    def parse_program(self) -> Sequence[ast.FunctionDeclaration]:
+    def parse_program(self) -> Sequence[tenast.FunctionDeclaration]:
         functions = []
         while self.peek_token_is_ident():
             functions.append(self.parse_function())
         return functions
 
-    def parse_function(self) -> ast.FunctionDeclaration:
+    def parse_function(self) -> tenast.FunctionDeclaration:
         name = self.read_ident()
-        static_args: list[ast.Token] = []
+        static_args: list[tenast.Token] = []
         if self.peek_token_is_op("["):
             self.read_op("[")
             if self.peek_token_is_ident():
                 static_args = self.parse_ident_list()
             self.read_op("]")
-        params: list[Tuple[ast.Token, ast.TensorType]] = []
+        params: list[Tuple[tenast.Token, tenast.TensorType]] = []
         if self.peek_token_is_op("|"):
             self.read_op("|")
             if self.peek_token_is_ident():
                 params = self.parse_param_list(True)
             self.read_op("|")
-        args: list[Tuple[ast.Token, ast.TensorType]] = []
+        args: list[Tuple[tenast.Token, tenast.TensorType]] = []
         self.read_op("(")
         if self.peek_token_is_ident():
             args = self.parse_param_list()
         self.read_op(")")
         self.read_op("->")
         ret = self.parse_tensor_type()
-        body: Optional[Sequence[ast.Statement]] = None
+        body: Optional[Sequence[tenast.Statement]] = None
         if self.peek_token_is_op(":"):
             self.read_op(":")
             statements = []
             while self.peek_token().indentation_level > name.indentation_level:
                 statements.append(self.parse_statement())
             body = statements
-        return ast.FunctionDeclaration(name, static_args, params, args, ret, body)
+        return tenast.FunctionDeclaration(name, static_args, params, args, ret, body)
 
-    def parse_ident_list(self) -> list[ast.Token]:
+    def parse_ident_list(self) -> list[tenast.Token]:
         ret = [self.read_ident()]
         while self.peek_token_is_op(","):
             self.read_op(",")
@@ -222,73 +222,73 @@ class Parser:
 
     def parse_param_list(
         self, allow_no_type=False
-    ) -> list[Tuple[ast.Token, ast.TensorType]]:
+    ) -> list[Tuple[tenast.Token, tenast.TensorType]]:
         ret = [self.parse_param(allow_no_type)]
         while self.peek_token_is_op(","):
             self.read_op(",")
             ret.append(self.parse_param(allow_no_type))
         return ret
 
-    def parse_param(self, allow_no_type=False) -> Tuple[ast.Token, ast.TensorType]:
+    def parse_param(self, allow_no_type=False) -> Tuple[tenast.Token, tenast.TensorType]:
         tok = self.read_ident()
         if allow_no_type and not self.peek_token_is_op(":"):
-            return (tok, ast.TensorType([]))
+            return (tok, tenast.TensorType([]))
         self.read_op(":")
         ty = self.parse_tensor_type()
         return (tok, ty)
 
-    def parse_statement(self) -> ast.Statement:
+    def parse_statement(self) -> tenast.Statement:
         if self.peek_token_is_ident("return"):
             return self.parse_return_statement()
         return self.parse_let_statement()
 
-    def parse_return_statement(self) -> ast.ReturnStatement:
+    def parse_return_statement(self) -> tenast.ReturnStatement:
         self.read_ident()
         expr = self.parse_expression()
-        return ast.ReturnStatement(expr)
+        return tenast.ReturnStatement(expr)
 
-    def parse_let_statement(self) -> ast.LetStatement:
+    def parse_let_statement(self) -> tenast.LetStatement:
         idents = self.parse_ident_list()
         self.read_op("=")
         expr = self.parse_expression()
-        return ast.LetStatement(idents, expr)
+        return tenast.LetStatement(idents, expr)
 
-    def parse_expression(self) -> ast.Expr:
+    def parse_expression(self) -> tenast.Expr:
         return self.parse_maybe_sum()
 
-    def parse_maybe_sum(self) -> ast.Expr:
+    def parse_maybe_sum(self) -> tenast.Expr:
         lhs = self.parse_maybe_product()
         while self.peek_token_is_op("+") or self.peek_token_is_op("-"):
             op = self.read_op()
             rhs = self.parse_maybe_product()
-            lhs = ast.BinaryExpr(op, lhs, rhs)
+            lhs = tenast.BinaryExpr(op, lhs, rhs)
         return lhs
 
-    def parse_maybe_product(self) -> ast.Expr:
+    def parse_maybe_product(self) -> tenast.Expr:
         lhs = self.parse_maybe_power()
         while self.peek_token_is_op("*") or self.peek_token_is_op("/"):
             op = self.read_op()
             rhs = self.parse_maybe_power()
-            lhs = ast.BinaryExpr(op, lhs, rhs)
+            lhs = tenast.BinaryExpr(op, lhs, rhs)
         return lhs
 
-    def parse_maybe_power(self) -> ast.Expr:
+    def parse_maybe_power(self) -> tenast.Expr:
         lhs = self.parse_maybe_matmul()
         while self.peek_token_is_op("**"):
             op = self.read_op("**")
             rhs = self.parse_maybe_matmul()
-            lhs = ast.BinaryExpr(op, lhs, rhs)
+            lhs = tenast.BinaryExpr(op, lhs, rhs)
         return lhs
 
-    def parse_maybe_matmul(self) -> ast.Expr:
+    def parse_maybe_matmul(self) -> tenast.Expr:
         lhs = self.parse_maybe_reshape()
         while self.peek_token_is_op("@"):
             op = self.read_op("@")
             rhs = self.parse_maybe_reshape()
-            lhs = ast.BinaryExpr(op, lhs, rhs)
+            lhs = tenast.BinaryExpr(op, lhs, rhs)
         return lhs
 
-    def parse_maybe_reshape(self) -> ast.Expr:
+    def parse_maybe_reshape(self) -> tenast.Expr:
         lhs = self.parse_primitive_expr()
         while self.peek_token_is_op("{"):
             self.read_op("{")
@@ -296,17 +296,17 @@ class Parser:
             self.read_op("->")
             to_shape = self.parse_reshape_type()
             self.read_op("}")
-            lhs = ast.ReshapeExpr(lhs, from_shape, to_shape, {})
+            lhs = tenast.ReshapeExpr(lhs, from_shape, to_shape, {})
         return lhs
 
-    def parse_primitive_expr(self) -> ast.Expr:
+    def parse_primitive_expr(self) -> tenast.Expr:
         tok = self.peek_token()
         if tok.kind == "OP" and tok.text == "(":
             return self.parse_paren_expr()
         elif tok.kind == "IDENT" and tok.text == "for":
             return self.parse_for_expr()
         elif tok.kind == "NUMBER":
-            return ast.FloatExpr(float(self.read_number().text))
+            return tenast.FloatExpr(float(self.read_number().text))
         elif tok.kind == "IDENT":
             # CallExpr / IndexExpr / Ident
             ident = self.read_ident()
@@ -318,50 +318,50 @@ class Parser:
             elif tok.kind == "OP" and tok.text == ".":
                 return self.parse_index_expr(ident)
             else:
-                return ast.VariableExpr(ident)
+                return tenast.VariableExpr(ident)
         raise Exception("Expected expression, found " + tok.text)
 
-    def parse_paren_expr(self) -> ast.Expr:
+    def parse_paren_expr(self) -> tenast.Expr:
         self.read_op("(")
         expr = self.parse_expression()
         self.read_op(")")
         return expr
 
-    def parse_call_expr(self, ident: ast.Token) -> ast.Expr:
-        static_args: list[ast.Expr] = []
+    def parse_call_expr(self, ident: tenast.Token) -> tenast.Expr:
+        static_args: list[tenast.Expr] = []
         if self.peek_token_is_op("["):
             self.read_op("[")
             if not self.peek_token_is_op("]"):
                 static_args = self.parse_arg_list()
             self.read_op("]")
-        params: list[ast.Expr] = []
+        params: list[tenast.Expr] = []
         if self.peek_token_is_op("|"):
             self.read_op("|")
             if not self.peek_token_is_op("|"):
                 params = self.parse_arg_list()
             self.read_op("|")
         self.read_op("(")
-        args: list[ast.Expr] = []
+        args: list[tenast.Expr] = []
         if not self.peek_token_is_op(")"):
             args = self.parse_arg_list()
         self.read_op(")")
-        return ast.CallExpr(ast.VariableExpr(ident), static_args, params, args)
+        return tenast.CallExpr(tenast.VariableExpr(ident), static_args, params, args)
 
-    def parse_arg_list(self) -> list[ast.Expr]:
+    def parse_arg_list(self) -> list[tenast.Expr]:
         ret = [self.parse_expression()]
         while self.peek_token_is_op(","):
             self.read_op(",")
             ret.append(self.parse_expression())
         return ret
 
-    def parse_index_expr(self, ident: ast.Token) -> ast.Expr:
+    def parse_index_expr(self, ident: tenast.Token) -> tenast.Expr:
         self.read_op(".")
         self.read_op("[")
         index = self.parse_expression()
         self.read_op("]")
-        return ast.IndexExpr(ast.VariableExpr(ident), index)
+        return tenast.IndexExpr(tenast.VariableExpr(ident), index)
 
-    def parse_for_expr(self) -> ast.Expr:
+    def parse_for_expr(self) -> tenast.Expr:
         self.read_ident("for")
         index = self.read_ident()
         self.read_ident("in")
@@ -374,11 +374,11 @@ class Parser:
         var = self.read_token()
         self.read_op("->")
         loop = self.parse_expression()
-        return ast.ForExpr(index, start, end, init, var, loop)
+        return tenast.ForExpr(index, start, end, init, var, loop)
 
-    def parse_reshape_type(self) -> ast.ReshapeTensorShape:
+    def parse_reshape_type(self) -> tenast.ReshapeTensorShape:
         tok = self.peek_token()
-        dims: list[Union[ast.Token, "ast.ReshapeTensorShape"]] = []
+        dims: list[Union[tenast.Token, "tenast.ReshapeTensorShape"]] = []
         if (
             tok.kind == "IDENT"
             or tok.kind == "NUMBER"
@@ -388,9 +388,9 @@ class Parser:
             while self.peek_token_is_op(","):
                 self.read_op(",")
                 dims.append(self.parse_reshape_dimension())
-        return ast.ReshapeTensorShape(dims)
+        return tenast.ReshapeTensorShape(dims)
 
-    def parse_reshape_dimension(self) -> Union[ast.Token, ast.ReshapeTensorShape]:
+    def parse_reshape_dimension(self) -> Union[tenast.Token, tenast.ReshapeTensorShape]:
         tok = self.read_token()
         if tok.kind == "IDENT" or tok.kind == "NUMBER":
             return tok
@@ -400,18 +400,18 @@ class Parser:
             return sub
         raise Exception("Expected tensor type dimension, got " + tok.text)
 
-    def parse_tensor_type(self) -> ast.TensorType:
+    def parse_tensor_type(self) -> tenast.TensorType:
         self.read_op("{")
-        dims: list[ast.Token] = []
+        dims: list[tenast.Token] = []
         if not self.peek_token_is_op("}"):
             dims.append(self.parse_dimension())
             while self.peek_token_is_op(","):
                 self.read_op(",")
                 dims.append(self.parse_dimension())
         self.read_op("}")
-        return ast.TensorType(dims)
+        return tenast.TensorType(dims)
 
-    def parse_dimension(self) -> ast.Token:
+    def parse_dimension(self) -> tenast.Token:
         tok = self.read_token()
         if not (
             tok.kind == "IDENT"
