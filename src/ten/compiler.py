@@ -309,7 +309,7 @@ class Compiler:
             return (
                 CallExpr(
                     VariableExpr(Token("IDENT", func_name, 0, 0)),
-                    [FloatExpr(a) for a in compiled_static_args],
+                    [FloatExpr(a) for a in compiled_static_args], # type: ignore
                     expr.param_args,  # TODO: Compiled?
                     [e for (e, _) in compiled_args],
                 ),

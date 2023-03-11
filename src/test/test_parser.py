@@ -1062,7 +1062,7 @@ class InterpreterTestCase(unittest.TestCase):
                     **{k: compiler.Func(v) for k, v in c.funcs.items()},
                     **self.built_in_impls,
                 },
-                {k: v.decl() for k, v in self.built_in_impls.items()},
+                {k: v.decl() for k, v in self.built_in_impls.items()}, # type: ignore
             ),
         )
         if not isinstance(ret, np.ndarray):
@@ -1126,7 +1126,7 @@ class InterpreterTestCase(unittest.TestCase):
                     **{k: compiler.Func(v) for k, v in c.funcs.items()},
                     **self.built_in_impls,
                 },
-                {k: v.decl() for k, v in self.built_in_impls.items()},
+                {k: v.decl() for k, v in self.built_in_impls.items()}, # type: ignore
             ),
         )
         # expected = expected = self.gelu(x @ w1 + b1) @ w2 + b2
