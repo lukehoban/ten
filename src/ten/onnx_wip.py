@@ -4,9 +4,11 @@ import onnx
 from onnx import helper as onnxmod
 import numpy as np
 from dataclasses import dataclass
-from typing import Mapping, Sequence, Optional, Dict
+from typing import Mapping, Sequence, Optional, Dict, cast
 
 from .tenast import (
+    CallExpr,
+    FloatExpr,
     FunctionDeclaration,
     TensorType,
     Token,
@@ -54,15 +56,12 @@ class Compiler:
     ) -> onnx.GraphProto:
         # Args and Ret -> Inputs and Output(s)
         inputs: list[onnx.ValueInfoProto] = []
+        # TODO: We can't be sure the rank if there are ... in the type - so for now we just don't try :-)
         for tok, typ in function.args:
-            shape = self.compile_tensor_type(typ, static_args)
             inputs.append(
-                onnxmod.make_tensor_value_info(tok.text, onnx.TensorProto.FLOAT, shape)
+                onnxmod.make_tensor_value_info(tok.text, onnx.TensorProto.FLOAT, None)
             )
-        ret_shape = self.compile_tensor_type(function.ret, static_args)
-        outputs = [
-            onnxmod.make_tensor_value_info("ret", onnx.TensorProto.FLOAT, ret_shape)
-        ]
+        outputs = [onnxmod.make_tensor_value_info("ret", onnx.TensorProto.FLOAT, None)]
 
         # Params -> Constants
         initializers: list[onnx.TensorProto] = []
@@ -102,15 +101,15 @@ class Compiler:
     def compile_expr(
         self,
         expr: Expr,
-        static_args: Mapping[str, float],
+        env: Mapping[str, float],
         nodes: list[onnx.NodeProto],
         output: Optional[str] = None,
     ) -> str:
         if output is None:
             output = self.make_temp()
         if isinstance(expr, BinaryExpr):
-            t1 = self.compile_expr(expr.left, static_args, nodes)
-            t2 = self.compile_expr(expr.right, static_args, nodes)
+            t1 = self.compile_expr(expr.left, env, nodes)
+            t2 = self.compile_expr(expr.right, env, nodes)
             if expr.op.text == "@":
                 nodes.append(
                     onnxmod.make_node(
@@ -127,18 +126,71 @@ class Compiler:
                         outputs=[output],
                     )
                 )
+            elif expr.op.text == "*":
+                nodes.append(
+                    onnxmod.make_node(
+                        "Mul",
+                        inputs=[t1, t2],
+                        outputs=[output],
+                    )
+                )
+            elif expr.op.text == "**":
+                nodes.append(
+                    onnxmod.make_node(
+                        "Pow",
+                        inputs=[t1, t2],
+                        outputs=[output],
+                    )
+                )
             else:
-                raise NotImplementedError("BinaryExpr")
+                raise NotImplementedError(f"BinaryExpr: {expr.op.text}")
         elif isinstance(expr, VariableExpr):
+            return expr.name.text
+        elif isinstance(expr, FloatExpr):
             nodes.append(
                 onnxmod.make_node(
-                    "Identity",
-                    inputs=[expr.name.text],
+                    "Constant",
+                    inputs=[],
                     outputs=[output],
+                    value=onnxmod.make_tensor(
+                        name=output,
+                        data_type=onnx.TensorProto.FLOAT,
+                        dims=[],
+                        vals=[float(expr.value)],
+                    ),
                 )
             )
+        elif isinstance(expr, CallExpr):
+            args, static_args, param_args = cast(tuple[list[str], ...], ([], [], []))
+            for arg in expr.static_args:
+                raise NotImplementedError("call static args")
+            for arg in expr.param_args:
+                raise NotImplementedError("call param args")
+            for arg in expr.args:
+                args.append(self.compile_expr(arg, env, nodes))
+            if not isinstance(expr.f, VariableExpr):
+                raise NotImplementedError("non-variable function call")
+            if expr.f.name.text in self.graphs:
+                graph = self.graphs[expr.f.name.text]
+                # TODO: Need to map args into params and returns into output
+                # nodes.append(
+                #     onnxmod.make_node(
+                #         "Identity",
+                #         inputs=[expr.f.name.text],
+                #         outputs=[output],
+                #     )
+                # )
+            else:
+                nodes.append(
+                    onnxmod.make_node(
+                        expr.f.name.text,
+                        inputs=args,
+                        # TODO - destructuring outputs
+                        outputs=[output],
+                    )
+                )
         else:
-            raise NotImplementedError("Unknown expr type")
+            raise NotImplementedError(f"Unknown expr type: {type(expr)}")
         return output
 
     def compile_tensor_type(
