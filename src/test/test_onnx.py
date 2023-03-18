@@ -60,6 +60,45 @@ class OnnxCompilerTestCase(unittest.TestCase):
                 np.float32(y),
             )
 
+    def test_ffn(self):
+        p = parse.Parser(
+            """
+            Gelu(x: {...}) -> {...}:
+                return 0.5 * x * (1 + Tanh(0.7978845608 * x + 0.044715 * x**3))
+
+            Linear[N,K]|w:{N,K},b:{K}|(x:{...,N}) -> {...,K}:
+                return x@w + b
+
+            FFN[S,E]|c_fc, c_proj|(x:{S,E}) -> {S,E}:
+                return Linear[E*4,E]|c_proj|(Gelu(Linear[E,E*4]|c_fc|(x)))
+            """
+        )
+        decls = p.parse_program()
+        ffn_decl = decls[2]
+        compiler = onnx_wip.Compiler()
+        static_args = {"S": 3, "E": 2}
+        params = {
+            "c_fc": {"w": np.ones([2, 8]), "b": np.ones([8])},
+            "c_proj": {"w": np.ones([8, 2]), "b": np.ones([2])},
+        }
+        model = compiler.compile_program(decls, ffn_decl, static_args, params)
+        print(onnx_printer.to_text(model))
+        ort_sess = ort.InferenceSession(model.SerializeToString())
+        outputs = ort_sess.run(
+            None,
+            {
+                "x": [
+                    [1.1, 1.2],
+                    [1.3, 1.4],
+                    [1.5, 1.6],
+                ]
+            },
+        )
+        np.testing.assert_array_almost_equal(
+            outputs[0],
+            [[27.39452, 27.39452], [30.599133, 30.599133], [33.7999, 33.7999]],
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

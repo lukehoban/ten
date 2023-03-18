@@ -4,7 +4,7 @@ import onnx
 from onnx import helper as onnxmod
 import numpy as np
 from dataclasses import dataclass
-from typing import Mapping, Sequence, Optional, Dict, cast
+from typing import Mapping, Sequence, Optional, Dict, Union
 
 from .tenast import (
     CallExpr,
@@ -22,72 +22,68 @@ from .tenast import (
 
 @dataclass
 class Env:
-    vars: Mapping[str, float]
+    parent: Optional["Env"]
+    vars: Mapping[str, str]
 
-    def lookup(self, name: str) -> float:
-        return self.vars[name]
+    def lookup(self, name: str) -> Optional[str]:
+        if name in self.vars:
+            return self.vars[name]
+        if self.parent is not None:
+            return self.parent.lookup(name)
+        return None
+
+
+ParamsValue = Union[Mapping[str, "ParamsValue"], np.ndarray]
 
 
 class Compiler:
     graphs: Dict[str, onnx.GraphProto] = {}
+    # TODO: Should this be in env?
+    funcs: Dict[str, FunctionDeclaration] = {}
     i = 0
 
-    def make_temp(self) -> str:
+    def make_temp(self, name="t") -> str:
         self.i += 1
-        return f"t{self.i}"
+        return f"{name}{self.i}"
 
     def compile_program(
         self,
         program: Sequence[FunctionDeclaration],
         entry: FunctionDeclaration,
         static_args: Mapping[str, float],
-        params: Mapping[str, np.ndarray],
+        params: Mapping[str, ParamsValue],
     ) -> onnx.ModelProto:
-        graph = self.compile_function(entry, static_args, params)
+        for func in program:
+            self.funcs[func.name.text] = func
+        graph = self.compile_entry_function(entry, static_args, params)
         model = onnxmod.make_model(graph, producer_name="ten")
         model.opset_import[0].version = 13
         return model
 
-    def compile_function(
+    def compile_entry_function(
         self,
         function: FunctionDeclaration,
         static_args: Mapping[str, float],
-        params: Mapping[str, np.ndarray],
+        params: Mapping[str, ParamsValue],
     ) -> onnx.GraphProto:
         # Args and Ret -> Inputs and Output(s)
         inputs: list[onnx.ValueInfoProto] = []
         # TODO: We can't be sure the rank if there are ... in the type - so for now we just don't try :-)
+        env = {}
         for tok, typ in function.args:
             inputs.append(
                 onnxmod.make_tensor_value_info(tok.text, onnx.TensorProto.FLOAT, None)
             )
+            env[tok.text] = tok.text
         outputs = [onnxmod.make_tensor_value_info("ret", onnx.TensorProto.FLOAT, None)]
 
-        # Params -> Constants
-        initializers: list[onnx.TensorProto] = []
-        for tok, typ in function.params:
-            shape = self.compile_tensor_type(typ, static_args)
-            initializers.append(
-                onnxmod.make_tensor(
-                    name=tok.text,
-                    data_type=onnx.TensorProto.FLOAT,
-                    dims=[d or 0 for d in shape],
-                    vals=params[tok.text].flatten(),
-                )
-            )
-
         # Body -> Nodes
+        initializers: list[onnx.TensorProto] = []
         nodes: list[onnx.NodeProto] = []
-        if function.body is None:
-            raise NotImplementedError("No body")
-        for stmt in function.body:
-            if isinstance(stmt, ReturnStatement):
-                self.compile_expr(stmt.expr, static_args, nodes, "ret")
-            elif isinstance(stmt, LetStatement):
-                raise NotImplementedError("Let statement")
-            else:
-                raise NotImplementedError("Unknown statement type")
 
+        self.compile_call(
+            function, static_args, params, Env(None, env), nodes, initializers, "ret"
+        )
         ret = onnxmod.make_graph(
             name=function.name.text,
             nodes=nodes,
@@ -98,18 +94,73 @@ class Compiler:
         self.graphs[function.name.text] = ret
         return ret
 
+    def compile_call(
+        self,
+        function: FunctionDeclaration,
+        static_args: Mapping[str, float],
+        params: Mapping[str, ParamsValue],
+        env: Env,
+        nodes: list[onnx.NodeProto],
+        initializers: list[onnx.TensorProto],
+        output: Optional[str] = None,
+    ) -> str:
+        if output is None:
+            output = self.make_temp()
+        if function.body is None:
+            # TODO: Should builtins move here?
+            raise NotImplementedError("No body")
+        call_env_bindings = {}
+        for tok, typ in function.params:
+            shape = self.compile_tensor_type(typ, static_args)
+            param = params[tok.text]
+            if isinstance(param, np.ndarray):
+                name = self.make_temp(tok.text)
+                initializers.append(
+                    onnxmod.make_tensor(
+                        name=name,
+                        data_type=onnx.TensorProto.FLOAT,
+                        dims=[d or 0 for d in shape],
+                        vals=param.flatten(),
+                    )
+                )
+                call_env_bindings[tok.text] = name
+        for stmt in function.body:
+            if isinstance(stmt, ReturnStatement):
+                call_env = Env(env, call_env_bindings)
+                self.compile_expr(
+                    stmt.expr,
+                    static_args,
+                    params,
+                    call_env,
+                    nodes,
+                    initializers,
+                    output,
+                )
+            elif isinstance(stmt, LetStatement):
+                raise NotImplementedError("Let statement")
+            else:
+                raise NotImplementedError("Unknown statement type")
+        return output
+
     def compile_expr(
         self,
         expr: Expr,
-        env: Mapping[str, float],
+        static_env: Mapping[str, float],
+        param_env: Mapping[str, ParamsValue],
+        env: Env,
         nodes: list[onnx.NodeProto],
+        initializers: list[onnx.TensorProto],
         output: Optional[str] = None,
     ) -> str:
         if output is None:
             output = self.make_temp()
         if isinstance(expr, BinaryExpr):
-            t1 = self.compile_expr(expr.left, env, nodes)
-            t2 = self.compile_expr(expr.right, env, nodes)
+            t1 = self.compile_expr(
+                expr.left, static_env, param_env, env, nodes, initializers
+            )
+            t2 = self.compile_expr(
+                expr.right, static_env, param_env, env, nodes, initializers
+            )
             if expr.op.text == "@":
                 nodes.append(
                     onnxmod.make_node(
@@ -145,7 +196,10 @@ class Compiler:
             else:
                 raise NotImplementedError(f"BinaryExpr: {expr.op.text}")
         elif isinstance(expr, VariableExpr):
-            return expr.name.text
+            res = env.lookup(expr.name.text)
+            if res is None:
+                raise NotImplementedError(f"Unbound variable: {expr.name.text}")
+            return res
         elif isinstance(expr, FloatExpr):
             nodes.append(
                 onnxmod.make_node(
@@ -161,25 +215,54 @@ class Compiler:
                 )
             )
         elif isinstance(expr, CallExpr):
-            args, static_args, param_args = cast(tuple[list[str], ...], ([], [], []))
+            static_args: list[float] = []
             for arg in expr.static_args:
-                raise NotImplementedError("call static args")
+                static_args.append(self.eval_static_expr(arg, static_env))
+            param_args: list[ParamsValue] = []
             for arg in expr.param_args:
-                raise NotImplementedError("call param args")
+                if not isinstance(arg, VariableExpr):
+                    raise NotImplementedError("non-variable param arg")
+                param_args.append(param_env[arg.name.text])
+            args: list[str] = []
             for arg in expr.args:
-                args.append(self.compile_expr(arg, env, nodes))
+                args.append(
+                    self.compile_expr(
+                        arg, static_env, param_env, env, nodes, initializers
+                    )
+                )
             if not isinstance(expr.f, VariableExpr):
                 raise NotImplementedError("non-variable function call")
-            if expr.f.name.text in self.graphs:
-                graph = self.graphs[expr.f.name.text]
-                # TODO: Need to map args into params and returns into output
-                # nodes.append(
-                #     onnxmod.make_node(
-                #         "Identity",
-                #         inputs=[expr.f.name.text],
-                #         outputs=[output],
-                #     )
-                # )
+            if expr.f.name.text in self.funcs:
+                decl = self.funcs[expr.f.name.text]
+                if len(decl.static_args) != len(static_args):
+                    raise NotImplementedError("Wrong number of static args")
+                static_env = {
+                    tok.text: v for tok, v in zip(decl.static_args, static_args)
+                }
+                if len(param_args) == 1 and len(decl.params) != 1:
+                    param_arg = param_args[0]
+                    if isinstance(param_arg, np.ndarray):
+                        raise NotImplementedError(
+                            "Attempt to spread a tensor into a params list"
+                        )
+                    param_args = [param_arg[tok.text] for (tok, _) in decl.params]
+                if len(param_args) != len(decl.params):
+                    raise NotImplementedError("Wrong number of params")
+                params_env = {
+                    tok.text: v for (tok, _), v in zip(decl.params, param_args)
+                }
+                if len(args) != len(decl.args):
+                    raise NotImplementedError("Wrong number of args")
+                env_bindings = {tok.text: v for (tok, _), v in zip(decl.args, args)}
+                self.compile_call(
+                    decl,
+                    static_env,
+                    params_env,
+                    Env(None, env_bindings),
+                    nodes,
+                    initializers,
+                    output,
+                )
             else:
                 nodes.append(
                     onnxmod.make_node(
@@ -192,6 +275,25 @@ class Compiler:
         else:
             raise NotImplementedError(f"Unknown expr type: {type(expr)}")
         return output
+
+    def eval_static_expr(self, expr: Expr, env: Mapping[str, float]) -> float:
+        if isinstance(expr, BinaryExpr):
+            t1 = self.eval_static_expr(expr.left, env)
+            t2 = self.eval_static_expr(expr.right, env)
+            if expr.op.text == "+":
+                return t1 + t2
+            elif expr.op.text == "*":
+                return t1 * t2
+            elif expr.op.text == "**":
+                return t1**t2
+            else:
+                raise NotImplementedError(f"BinaryExpr: {expr.op.text}")
+        elif isinstance(expr, VariableExpr):
+            return env[expr.name.text]
+        elif isinstance(expr, FloatExpr):
+            return float(expr.value)
+        else:
+            raise NotImplementedError(f"Unknown expr type: {type(expr)}")
 
     def compile_tensor_type(
         self, tensor: TensorType, static_args: Mapping[str, float]

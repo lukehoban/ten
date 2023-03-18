@@ -53,10 +53,9 @@ GPT2[H,S,E,B,V]|wte, wpe, blocks|(inputs:{S}) -> {S,V}:
     return LayerNorm[S,E]|ln_f|(z) @ Transpose[V,E](wte)
 ```
 
-Running `GPT2[12,10,768,12,50257]|weights from paper|([464, 1266, 8300, 3303, 329, 16215, 9552, 4981, 318])` using the trained params loaded from the GPT2 124M model from the G    PT2 paper, and passing in the encoded form of "The best programming language for defining AI models is", returns a result `ret` for which `argmax(ret[-1])` indicates that the most likely next token is `11361`, the encoded form of " Python" :-).
+Running `GPT2[12,10,768,12,50257]|weights from paper|([464, 1266, 8300, 3303, 329, 16215, 9552, 4981, 318])` using the trained params loaded from the GPT2 124M model from the GPT2 paper, and passing in the encoded form of "The best programming language for defining AI models is", returns a result `ret` for which `argmax(ret[-1])` indicates that the most likely next token is `11361`, the encoded form of " Python" :-).
 
 ## Implementation Status
-
 
 The current implementation type-checks and compiles, then interprets the Ten program using numpy.  This is obviously innefficient, but very flexible.  It's also largely incompatible with supporting training, which will require a higher-level execution environment.
 
