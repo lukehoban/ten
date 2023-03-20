@@ -10,6 +10,7 @@ from .tenast import (
     CallExpr,
     FloatExpr,
     FunctionDeclaration,
+    ReshapeExpr,
     TensorType,
     Token,
     ReturnStatement,
@@ -109,7 +110,7 @@ class Compiler:
         if function.body is None:
             # TODO: Should builtins move here?
             raise NotImplementedError("No body")
-        call_env_bindings = {}
+        env_bindings = {}
         for tok, typ in function.params:
             shape = self.compile_tensor_type(typ, static_args)
             param = params[tok.text]
@@ -123,21 +124,60 @@ class Compiler:
                         vals=param.flatten(),
                     )
                 )
-                call_env_bindings[tok.text] = name
+                env_bindings[tok.text] = name
+        env = Env(env, env_bindings)
         for stmt in function.body:
             if isinstance(stmt, ReturnStatement):
-                call_env = Env(env, call_env_bindings)
                 self.compile_expr(
                     stmt.expr,
                     static_args,
                     params,
-                    call_env,
+                    env,
                     nodes,
                     initializers,
                     output,
                 )
             elif isinstance(stmt, LetStatement):
-                raise NotImplementedError("Let statement")
+                out = self.compile_expr(
+                    stmt.expr, static_args, params, env, nodes, initializers
+                )
+                if len(stmt.variables) == 1:
+                    env_bindings[stmt.variables[0].text] = out
+                else:
+                    parts = [self.make_temp(v.text) for v in stmt.variables]
+                    nodes.append(
+                        onnxmod.make_node(
+                            "Split",
+                            inputs=[out],
+                            outputs=parts,
+                            axis=0,
+                        )
+                    )
+                    parts_squeezed = [self.make_temp(v.text) for v in stmt.variables]
+                    squeeze_zero_axis = self.make_temp("squeeze")
+                    nodes.append(
+                        onnxmod.make_node(
+                            "Constant",
+                            inputs=[],
+                            outputs=[squeeze_zero_axis],
+                            value=onnxmod.make_tensor(
+                                name=squeeze_zero_axis,
+                                data_type=onnx.TensorProto.INT64,
+                                dims=[1],
+                                vals=[0],
+                            ),
+                        )
+                    )
+                    for part, part_squeezed in zip(parts, parts_squeezed):
+                        nodes.append(
+                            onnxmod.make_node(
+                                "Squeeze",
+                                inputs=[part, squeeze_zero_axis],
+                                outputs=[part_squeezed],
+                            )
+                        )
+                    for v, o in zip(stmt.variables, parts_squeezed):
+                        env_bindings[v.text] = o
             else:
                 raise NotImplementedError("Unknown statement type")
         return output
@@ -161,45 +201,44 @@ class Compiler:
             t2 = self.compile_expr(
                 expr.right, static_env, param_env, env, nodes, initializers
             )
-            if expr.op.text == "@":
-                nodes.append(
-                    onnxmod.make_node(
-                        "MatMul",
-                        inputs=[t1, t2],
-                        outputs=[output],
-                    )
-                )
-            elif expr.op.text == "+":
-                nodes.append(
-                    onnxmod.make_node(
-                        "Add",
-                        inputs=[t1, t2],
-                        outputs=[output],
-                    )
-                )
-            elif expr.op.text == "*":
-                nodes.append(
-                    onnxmod.make_node(
-                        "Mul",
-                        inputs=[t1, t2],
-                        outputs=[output],
-                    )
-                )
-            elif expr.op.text == "**":
-                nodes.append(
-                    onnxmod.make_node(
-                        "Pow",
-                        inputs=[t1, t2],
-                        outputs=[output],
-                    )
-                )
-            else:
+            op_mapping = {
+                "@": "MatMul",
+                "+": "Add",
+                "-": "Sub",
+                "*": "Mul",
+                "/": "Div",
+                "**": "Pow",
+            }
+            op = op_mapping.get(expr.op.text)
+            if op is None:
                 raise NotImplementedError(f"BinaryExpr: {expr.op.text}")
+            nodes.append(
+                onnxmod.make_node(
+                    op,
+                    inputs=[t1, t2],
+                    outputs=[output],
+                )
+            )
         elif isinstance(expr, VariableExpr):
             res = env.lookup(expr.name.text)
+            if res is not None:
+                return res
+            res = static_env.get(expr.name.text)
             if res is None:
                 raise NotImplementedError(f"Unbound variable: {expr.name.text}")
-            return res
+            nodes.append(
+                onnxmod.make_node(
+                    "Constant",
+                    inputs=[],
+                    outputs=[output],
+                    value=onnxmod.make_tensor(
+                        name=output,
+                        data_type=onnx.TensorProto.FLOAT,  # TODO: This probably has to be an int?
+                        dims=[],
+                        vals=[float(res)],
+                    ),
+                )
+            )
         elif isinstance(expr, FloatExpr):
             nodes.append(
                 onnxmod.make_node(
@@ -264,14 +303,173 @@ class Compiler:
                     output,
                 )
             else:
-                nodes.append(
-                    onnxmod.make_node(
-                        expr.f.name.text,
-                        inputs=args,
-                        # TODO - destructuring outputs
-                        outputs=[output],
+                # Call a built-in
+                if expr.f.name.text == "Tri":
+                    if len(static_args) != 1:
+                        raise RuntimeError(
+                            "Expected a single static arg N for the dimension of the square lower triangular matrix for Tri"
+                        )
+                    N = int(static_args[0])
+                    nodes.append(
+                        onnxmod.make_node(
+                            "Constant",
+                            inputs=[],
+                            outputs=[output],
+                            value=onnxmod.make_tensor(
+                                name=output,
+                                data_type=onnx.TensorProto.FLOAT,
+                                dims=[N, N],
+                                vals=np.tri(N),
+                            ),
+                        )
                     )
+                elif expr.f.name.text == "Transpose":
+                    if len(static_args) != 2:
+                        raise RuntimeError(
+                            "Expected two static args N, K for Transpose"
+                        )
+                    nodes.append(
+                        onnxmod.make_node(
+                            "Transpose",
+                            inputs=args,
+                            outputs=[output],
+                            # TODO: This is wrong - we must type check the argument, and then use N and K to select indeces to permute
+                            perm=[0, 2, 1],
+                        )
+                    )
+                else:
+                    # Allow calling any built-in operator
+                    # TODO: Move these into standard library functions with type signatures and
+                    # wrappers over the ONNX operators
+                    # TODO: Do we handle static_args as attributes (or params?)
+                    nodes.append(
+                        onnxmod.make_node(
+                            expr.f.name.text,
+                            inputs=args,
+                            # TODO - destructuring outputs
+                            outputs=[output],
+                        )
+                    )
+        elif isinstance(expr, ReshapeExpr):
+            t1 = self.compile_expr(
+                expr.expr, static_env, param_env, env, nodes, initializers
+            )
+            # (S, (3, H, K)) -> (3, H, S, K)
+            # Steps to perform:
+            # 1. reshape into the flat input shape - (S, 3, H, K)
+            # 2. transpose to the flat output shape (3, H, S, K)
+            # 3. transpose into the final output shape (3, H, S, K)
+
+            # {H,S,K -> S,(H,K)}
+            # 1. reshape into the flat input shape - (H, S, K)
+            # 2. transpose to the output flat shape (S, H, K)
+            # 3. reshape into the final output shape (S, (H, K))
+            input_dims: list[int] = []
+            input_positions: Dict[str, int] = {}
+            position = 0
+            for dim in expr.reshape_from.dims:
+                if isinstance(dim, Token):
+                    if dim.kind == "IDENT":
+                        input_dims.append(int(static_env[dim.text]))
+                        input_positions[dim.text] = position
+                    elif dim.kind == "NUMBER":
+                        input_dims.append(int(float(dim.text)))
+                        input_positions[dim.text] = position
+                    else:
+                        raise RuntimeError("Only static dimensions allowed in reshape")
+                else:
+                    for inner_dim in dim.dims:
+                        if not isinstance(inner_dim, Token):
+                            raise RuntimeError(
+                                "Only one level of nested reshape input types allowed"
+                            )
+                        else:
+                            if inner_dim.kind == "IDENT":
+                                input_dims.append(int(static_env[inner_dim.text]))
+                                input_positions[inner_dim.text] = position
+                            elif inner_dim.kind == "NUMBER":
+                                input_dims.append(int(float(inner_dim.text)))
+                                input_positions[inner_dim.text] = position
+                            else:
+                                raise RuntimeError(
+                                    "Only static dimensions allowed in reshape"
+                                )
+                        position = position + 1
+                position = position + 1
+            input_dims_name = self.make_temp()
+            nodes.append(
+                onnxmod.make_node(
+                    "Constant",
+                    inputs=[],
+                    outputs=[input_dims_name],
+                    value=onnxmod.make_tensor(
+                        name=output,
+                        data_type=onnx.TensorProto.INT64,
+                        dims=[len(input_dims)],
+                        vals=input_dims,
+                    ),
                 )
+            )
+            reshaped_name = self.make_temp()
+            nodes.append(
+                onnxmod.make_node(
+                    "Reshape",
+                    inputs=[t1, input_dims_name],
+                    outputs=[reshaped_name],
+                )
+            )
+            perm_dims: list[int] = []
+            final_shape: list[int] = []
+            for dim in expr.reshape_to.dims:
+                if isinstance(dim, Token):
+                    if dim.kind == "IDENT":
+                        final_shape.append(int(static_env[dim.text]))
+                    elif dim.kind == "NUMBER":
+                        final_shape.append(int(float(dim.text)))
+                    perm_dims.append(input_positions[dim.text])
+                else:
+                    out_dim = 1
+                    for inner_dim in dim.dims:
+                        if not isinstance(inner_dim, Token):
+                            raise RuntimeError(
+                                "Only one level of nested reshape output types allowed"
+                            )
+                        if inner_dim.kind == "IDENT":
+                            out_dim = out_dim * int(static_env[inner_dim.text])
+                        elif inner_dim.kind == "NUMBER":
+                            out_dim = out_dim * int(float(inner_dim.text))
+                        perm_dims.append(input_positions[inner_dim.text])
+                    final_shape.append(out_dim)
+            transposed_name = self.make_temp()
+            nodes.append(
+                onnxmod.make_node(
+                    "Transpose",
+                    inputs=[reshaped_name],
+                    outputs=[transposed_name],
+                    perm=perm_dims,
+                )
+            )
+            output_dims_name = self.make_temp()
+            nodes.append(
+                onnxmod.make_node(
+                    "Constant",
+                    inputs=[],
+                    outputs=[output_dims_name],
+                    value=onnxmod.make_tensor(
+                        name=output,
+                        data_type=onnx.TensorProto.INT64,
+                        dims=[len(final_shape)],
+                        vals=final_shape,
+                    ),
+                )
+            )
+            nodes.append(
+                onnxmod.make_node(
+                    "Reshape",
+                    inputs=[transposed_name, output_dims_name],
+                    outputs=[output],
+                )
+            )
         else:
             raise NotImplementedError(f"Unknown expr type: {type(expr)}")
         return output

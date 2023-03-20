@@ -1115,14 +1115,6 @@ class InterpreterTestCase(unittest.TestCase):
             compiler.Env(
                 None,
                 {
-                    # "Gelu_2": parse.Func(self.gelu_decl),
-                    # "Linear_1": parse.Func(self.linear_decl),
-                    # "Attention_9": parse.Func(self.attention_decl),
-                    # "Softmax": parse.Func(self.softmax_decl),
-                    # "Linear_3": parse.Func(self.linear_decl),
-                    # "Linear_4": parse.Func(self.linear_decl),
-                    # "Gelu_4": parse.Func(self.gelu_decl),
-                    # "Gelu_6": parse.Func(self.gelu_decl),
                     **{k: compiler.Func(v) for k, v in c.funcs.items()},
                     **self.built_in_impls,
                 },

@@ -5,6 +5,8 @@ from src.ten import parse, onnx_wip
 import numpy as np
 import onnxruntime as ort
 import onnx.printer as onnx_printer
+import onnx.shape_inference as onnx_shape_inference
+from test import baseline
 
 
 class OnnxCompilerTestCase(unittest.TestCase):
@@ -82,7 +84,8 @@ class OnnxCompilerTestCase(unittest.TestCase):
             "c_proj": {"w": np.ones([8, 2]), "b": np.ones([2])},
         }
         model = compiler.compile_program(decls, ffn_decl, static_args, params)
-        print(onnx_printer.to_text(model))
+        print(model.graph.initializer)
+        print(onnx_printer.to_text(model.graph))
         ort_sess = ort.InferenceSession(model.SerializeToString())
         outputs = ort_sess.run(
             None,
@@ -97,6 +100,53 @@ class OnnxCompilerTestCase(unittest.TestCase):
         np.testing.assert_array_almost_equal(
             outputs[0],
             [[27.39452, 27.39452], [30.599133, 30.599133], [33.7999, 33.7999]],
+        )
+
+    def test_mha(self):
+        p = parse.Parser(
+            """
+            SoftMax[N](x: {...,N}) -> {...,N}:
+                exp_x = Exp(x - Max(x))
+                return exp_x / Sum(exp_x)
+
+            Linear[N,K]|w:{N,K},b:{K}|(x:{...,N}) -> {...,K}:
+                return x@w + b
+
+            Attention[Q,K,N,V](q:{...,Q,K}, k:{...,N,K}, v:{...,N,V}, mask:{Q,N}) -> {...,Q,V}:
+                return Softmax[N](q @ Transpose[N,K](k) / Sqrt(K) + mask) @ v
+            
+            MHA[H,S,E,K]|c_attn, c_proj|(x:{S,E}) -> {S,E}:
+                q, k, v = Linear[E,E*3]|c_attn|(x) {S,(3,H,K) -> 3,H,S,K}
+                causal_mask = (Tri[S]() - 1) * 1e10
+                out = Attention[S,K,S,K](q, k, v, causal_mask) {H,S,K -> S,(H,K)}   
+                return Linear[E,E]|c_proj|(out)
+            """
+        )
+        decls = p.parse_program()
+        ffn_decl = decls[3]
+        compiler = onnx_wip.Compiler()
+        static_args = {"H": 2, "S": 3, "E": 4, "K": 2}
+        params = {
+            "c_attn": {"w": np.ones([4, 12]), "b": np.ones([12])},
+            "c_proj": {"w": np.ones([4, 4]), "b": np.ones([4])},
+        }
+        model = compiler.compile_program(decls, ffn_decl, static_args, params)
+        model = onnx_shape_inference.infer_shapes(
+            model, check_type=True, data_prop=True
+        )
+        print(model.graph.initializer)
+        print(onnx_printer.to_text(model.graph))
+        ort_sess = ort.InferenceSession(model.SerializeToString())
+        x = [
+            [1.1, 1.2, 1.3, 1.4],
+            [1.3, 1.4, 1.5, 1.6],
+            [1.5, 1.6, 1.7, 1.8],
+        ]
+        outputs = ort_sess.run(None, {"x": x})
+        expected = baseline.mha(x, params["c_attn"], params["c_proj"], 2)
+        np.testing.assert_array_almost_equal(
+            outputs[0],
+            expected,
         )
 
 

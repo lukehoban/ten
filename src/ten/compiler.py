@@ -607,14 +607,6 @@ class Interpreter:
                         m[dim.text] = s
                         vals[s] = int(float(dim.text))
                     elif dim.kind == "IDENT":
-                        # v = env.lookup(dim.text)
-                        # if v is None:
-                        #     raise RuntimeError(f"could not find {dim.text} in scope")
-                        # if not isinstance(v, float):
-                        #     raise RuntimeError(
-                        #         f"variable {dim.text} of non-number type {type(v)} used in dimension"
-                        #     )
-                        # vals[dim.text] = v
                         s = dim.text
                     else:
                         raise RuntimeError("Unknown reshape dimension type.")
@@ -629,16 +621,6 @@ class Interpreter:
                                 m[d.text] = s
                                 vals[s] = int(float(d.text))
                             elif d.kind == "IDENT":
-                                # v = env.lookup(d.text)
-                                # if v is None:
-                                #     raise RuntimeError(
-                                #         f"could not find {d.text} in scope"
-                                #     )
-                                # if not isinstance(v, float):
-                                #     raise RuntimeError(
-                                #         f"variable {d.text} of non-number type {type(v)} used in dimension"
-                                #     )
-                                # vals[d.text] = v
                                 s = d.text
                             else:
                                 raise RuntimeError("Unknown reshape dimension type.")
