@@ -992,18 +992,64 @@ class InterpreterTestCase(unittest.TestCase):
         else:
             self.assertIsInstance(ret, np.ndarray)
 
-    def test_eval_gpt2(self):
+    def gpt2_like(self, hsebv: Sequence[int], params_arr: Any, input: np.ndarray, expected: Sequence[int]):
         i = compiler.Interpreter()
         c = compiler.Compiler()
 
+        [_, S, _, _, V] = hsebv
+        
+        gpt2_decl = c.compile_function(
+            self.gpt2_decl,
+            [float(x) for x in hsebv],
+            compiler.TypeEnv(
+                None,
+                {},
+                {},
+                {
+                    "Gelu": self.gelu_decl,
+                    "Linear": self.linear_decl,
+                    "FFN": self.ffn_decl,
+                    "Attention": self.attention_decl,
+                    "Softmax": self.softmax_decl,
+                    "Transformer": self.transformer_decl,
+                    "LayerNorm": self.layernorm_decl,
+                    "MHA": self.mha_decl,
+                    **self.built_ins,
+                },
+            ),
+        )
+        print(f"compiled funcs: {c.funcs.keys()}")
+
+        ret = i.eval_call_expr(
+            gpt2_decl,
+            params_arr,
+            [input],
+            compiler.Env(
+                None,
+                {
+                    **{k: compiler.Func(v) for k, v in c.funcs.items()},
+                    **self.built_in_impls,
+                },
+                {k: v.decl() for k, v in self.built_in_impls.items()}, # type: ignore
+            ),
+        )
+        if not isinstance(ret, np.ndarray):
+            self.assertIsInstance(ret, np.ndarray)
+            return
+        self.assertEqual(ret.shape, (S, V))
+        next_toks = [np.argmax(x) for x in ret]
+        print(next_toks)
+        self.assertEqual(next_toks, expected)  
+
+    def test_eval_gpt2(self):
         V = 50257
         C = 1024
         E = 768
         H = 12
         B = 12
-        S = 10
+        S = 11
         params: Any = baseline.load_gpt2_params_from_tf_ckpt(
-            "src/test/model/model.ckpt",
+            "src/test/model/gpt2/model.ckpt",
             {"n_vocab": V, "n_ctx": C, "n_embd": E, "n_head": H, "n_layer": B},
         )
         params_arr = [
@@ -1026,51 +1072,64 @@ class InterpreterTestCase(unittest.TestCase):
             ],
             [params["ln_f"]["g"], params["ln_f"]["b"]],
         ]
+        # Alan => , 
+        # Alan Turning => ,
+        # Alan Turing theor => ized
+        # Alan Turing theorized => that
+        # Alan Turing theorized that => the
+        # Alan Turing theorized that computers => could
+        # Alan Turing theorized that computers would => be
+        # Alan Turing theorized that computers would one => day
+        # Alan Turing theorized that computers would one day => be
+        # Alan Turing theorized that computers would one day become => the
+        # Alan Turing theorized that computers would one day become the => most
+        # [",", ",", "ized", " that", " the", " would",  " one", " day", " the", " most"]
+        input = np.array([36235, 39141, 18765, 1143, 326, 9061, 561, 530, 1110, 1716, 262])
+        self.gpt2_like([H,S,E,B,V], params_arr, input, [11, 11, 1143, 326, 262, 714, 307, 1110, 307, 262, 749])
 
-        gpt2_decl = c.compile_function(
-            self.gpt2_decl,
-            [12.0, 10.0, 768.0, 12.0, 50257.0],  # H, S, E, B, V
-            compiler.TypeEnv(
-                None,
-                {},
-                {},
-                {
-                    "Gelu": self.gelu_decl,
-                    "Linear": self.linear_decl,
-                    "FFN": self.ffn_decl,
-                    "Attention": self.attention_decl,
-                    "Softmax": self.softmax_decl,
-                    "Transformer": self.transformer_decl,
-                    "LayerNorm": self.layernorm_decl,
-                    "MHA": self.mha_decl,
-                    **self.built_ins,
-                },
-            ),
-        )
-        print(f"compiled funcs: {c.funcs.keys()}")
-
-        # Alan Turing theorized that computers would one day become
-        x = np.array([36235, 39141, 18765, 1143, 326, 9061, 561, 530, 1110, 1716])
-
-        ret = i.eval_call_expr(
-            gpt2_decl,
-            params_arr,
-            [x],
-            compiler.Env(
-                None,
-                {
-                    **{k: compiler.Func(v) for k, v in c.funcs.items()},
-                    **self.built_in_impls,
-                },
-                {k: v.decl() for k, v in self.built_in_impls.items()}, # type: ignore
-            ),
-        )
-        if not isinstance(ret, np.ndarray):
-            self.assertIsInstance(ret, np.ndarray)
-            return
-        self.assertEqual(ret.shape, (10, 50257))
-        next_tok = np.argmax(ret[-1])
-        self.assertEqual(next_tok, 262)  # ' the'
+    def test_eval_cerebras_gpt(self):
+        V = 50257
+        C = 4352
+        E = 1088
+        H = 17
+        B = 14
+        S = 11
+        import torch
+        params = torch.load("src/test/model/cerebras_gpt/pytorch_model.bin")
+        params_arr = [
+            params["transformer.wte.weight"].numpy(),
+            params["transformer.wpe.weight"].numpy(),
+            [
+                [
+                    [
+                        [params[f"transformer.h.{i}.mlp.c_fc.weight"].numpy(), params[f"transformer.h.{i}.mlp.c_fc.bias"].numpy()],
+                        [params[f"transformer.h.{i}.mlp.c_proj.weight"].numpy(), params[f"transformer.h.{i}.mlp.c_proj.bias"].numpy()],
+                    ],
+                    [
+                        [params[f"transformer.h.{i}.attn.c_attn.weight"].numpy(), params[f"transformer.h.{i}.attn.c_attn.bias"].numpy()],
+                        [params[f"transformer.h.{i}.attn.c_proj.weight"].numpy(), params[f"transformer.h.{i}.attn.c_proj.bias"].numpy()],
+                    ],
+                    [params[f"transformer.h.{i}.ln_1.weight"].numpy(), params[f"transformer.h.{i}.ln_1.bias"].numpy()],
+                    [params[f"transformer.h.{i}.ln_2.weight"].numpy(), params[f"transformer.h.{i}.ln_2.bias"].numpy()],
+                ]
+                for i in range(0, B)
+            ],
+            [params["transformer.ln_f.weight"].numpy(), params["transformer.ln_f.bias"].numpy()],
+        ]
+        
+        # Alan => , 
+        # Alan Turning => ,
+        # Alan Turing theor => izes
+        # Alan Turing theorized => that
+        # Alan Turing theorized that => the
+        # Alan Turing theorized that computers => are
+        # Alan Turing theorized that computers would => be
+        # Alan Turing theorized that computers would one => day
+        # Alan Turing theorized that computers would one day => be
+        # Alan Turing theorized that computers would one day become => "
+        # Alan Turing theorized that computers would one day become the => "
+        input = np.array([36235, 39141, 18765, 1143, 326, 9061, 561, 530, 1110, 1716, 262])
+        self.gpt2_like([H,S,E,B,V], params_arr, input, [11, 11, 4340, 326, 262, 389, 307, 1110, 307, 366, 366])
 
     def test_eval_call_mha(self):
         i = compiler.Interpreter()

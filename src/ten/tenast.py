@@ -100,14 +100,6 @@ class TensorType:
 
 @dataclass
 class ReshapeTensorShape:
-    """
-    Valid reshape tensor shapes are:
-    * S,(3,H,K)
-    * 3,H,S,K
-    * H,S,K
-    * S,(H,K)
-    """
-
     dims: Sequence[Union[Token, "ReshapeTensorShape"]]
 
 
