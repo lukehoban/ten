@@ -18,7 +18,7 @@ FFN[S,E]|c_fc, c_proj|(x:{S,E}) -> {S,E}:
     return Linear[E*4,E]|c_proj|(a)
 
 Attention[Q,K,N,V](q:{...,Q,K}, k:{...,N,K}, v:{...,N,V}, mask:{Q,N}) -> {...,Q,V}:
-    return Softmax[N](q @ Transpose[N,K](k) / Sqrt(K) + mask) @ v
+    return SoftMax[N](q @ Transpose[N,K](k) / Sqrt(K) + mask) @ v
 
 MHA[H,S,E,K]|c_attn, c_proj|(x:{S,E}) -> {S,E}:
     q, k, v = Linear[E,E*3]|c_attn|(x) {S,(3,H,K) -> 3,H,S,K}
@@ -30,8 +30,7 @@ Transformer[H,S,E]|mlp, attn, ln_1, ln_2|(x:{S,E}) -> {S, E}:
     y = x + MHA[H,S,E,E/H]|attn|(LayerNorm[S,E]|ln_1|(x))
     return y + FFN[S,E]|mlp|(LayerNorm[S,E]|ln_2|(y))
 
-GPT2[H,S,E,B,V]|wte, wpe, blocks|(inputs:{S}) -> {S,V}:
+GPT2[H,S,E,B,V]|wte:{V,E}, wpe:{S,E}, blocks, ln_f|(inputs:{S}) -> {S,V}:
     x = wte.[inputs] + wpe.[Range[S]()]
     z = for i in 0...B: x, y -> Transformer[H,S,E]|blocks.[i]|(y)
     return LayerNorm[S,E]|ln_f|(z) @ Transpose[V,E](wte)     
-

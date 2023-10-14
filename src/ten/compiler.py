@@ -83,7 +83,6 @@ class Compiler:
     def compile_function(
         self, func: FunctionDeclaration, static_args: Sequence[Value], env: TypeEnv
     ) -> FunctionDeclaration:
-        print(f"compiling {func.name.text}")
         if len(static_args) != len(func.static_args):
             raise Exception(
                 f"Wrong number of static args for {func.name.text}, expected {func.static_args} got {static_args}"
@@ -329,7 +328,6 @@ class Compiler:
             e, e_type = self.compile_expr(expr.expr, env)
             idx, idx_type = self.compile_expr(expr.index, env)
             ret_type = TensorType([idx_type.dims[0], *e_type.dims[1:]])
-            print(f"compiled IndexExpr with {e_type} and {idx_type} => {ret_type}")
             return IndexExpr(e, idx), ret_type
         elif isinstance(expr, ForExpr):
             start = self.eval_static_expr(expr.start, env)
@@ -570,7 +568,6 @@ class Interpreter:
         raise NotImplementedError("Unknown statement type.")
 
     def eval_expr(self, expr: Expr, env: Env) -> Value:
-        print(f"eval_expr({expr})")
         if isinstance(expr, FloatExpr):
             return expr.value
         elif isinstance(expr, CallExpr):
@@ -664,7 +661,6 @@ class Interpreter:
                     rearrange_str += ") "
                 else:
                     raise RuntimeError("Unknown reshape dimension type.")
-            print(f"rearrange -> {rearrange_str}")
             return einops.rearrange(v, rearrange_str, **expr.constraints, **vals)
         elif isinstance(expr, BinaryExpr):
             left = self.eval_expr(expr.left, env)
