@@ -85,7 +85,7 @@ def main(
             if not isinstance(ret, np.ndarray):
                 raise RuntimeError("invalid return value")
             next_tok = np.argmax(ret[-1])
-            x += [next_tok]
+            x = np.append(x, next_tok)
             next_str = enc.decode([next_tok])
             print(next_str)
 

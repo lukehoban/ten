@@ -119,5 +119,18 @@ $ python3 -m unittest test.test_onnx # Not fully functional
 Run the CLI (requires putting the GPT2 checkpoint model checkpoints in `test/model/gpt2`):
 
 ```shell
-$ python3 . ./examples/gpt2.ten
+$ python3 . "Alan Turing theorized"
+[36235 39141 18765  1143]
+Alan Turing theorized
+ that
+ the
+ universe
+ is
+ a
+ "
+super
+-
+dimensional
+"
+ universe
 ```
