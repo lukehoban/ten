@@ -116,7 +116,7 @@ $ python3 -m unittest test.test_parser
 $ python3 -m unittest test.test_onnx # Not fully functional
 ```
 
-Run the CLI (note - this isn't fully functional yet):
+Run the CLI (requires putting the GPT2 checkpoint model checkpoints in `test/model/gpt2`):
 
 ```shell
 $ python3 . ./examples/gpt2.ten
