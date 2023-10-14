@@ -106,3 +106,18 @@ Design questions:
 * How to best select axis for reductions? (Postfix with an index reduction { IJ -> I}?)
   * We have chosen to always operate on the last dimension, which is actually reasonable as it allows a reshape to be applied to collect appropriate dimensions prior to the reduction
 * Can we make broadcasting more implicit in the type system (instead of requiring ... prefix?)
+
+## Running CLI and Tests
+
+Run tests:
+
+```shell
+$ python3 -m unittest test.test_parser
+$ python3 -m unittest test.test_onnx # Not fully functional
+```
+
+Run the CLI (note - this isn't fully functional yet):
+
+```shell
+$ python3 . ./examples/gpt2.ten
+```

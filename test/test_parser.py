@@ -1,10 +1,10 @@
 # Copyright 2023 Luke Hoban
 
 import unittest
-from src.ten import tenast, parse, compiler
+from ten import tenast, parse, compiler
 import numpy as np
 from typing import Union, Sequence, Optional, Any
-import baseline
+from . import baseline
 
 gpt2_example = """
 Gelu(x: {...}) -> {...}:
@@ -1049,7 +1049,7 @@ class InterpreterTestCase(unittest.TestCase):
         B = 12
         S = 11
         params: Any = baseline.load_gpt2_params_from_tf_ckpt(
-            "src/test/model/gpt2/model.ckpt",
+            "test/model/gpt2/model.ckpt",
             {"n_vocab": V, "n_ctx": C, "n_embd": E, "n_head": H, "n_layer": B},
         )
         params_arr = [
@@ -1095,7 +1095,7 @@ class InterpreterTestCase(unittest.TestCase):
         B = 14
         S = 11
         import torch
-        params = torch.load("src/test/model/cerebras_gpt/pytorch_model.bin")
+        params = torch.load("test/model/cerebras_gpt/pytorch_model.bin")
         params_arr = [
             params["transformer.wte.weight"].numpy(),
             params["transformer.wpe.weight"].numpy(),
