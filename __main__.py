@@ -1,7 +1,7 @@
 # Copyright 2023 Luke Hoban
 
 import fire
-from src.ten import parse, compiler
+from ten import parse, compiler
 from typing import Optional
 
 

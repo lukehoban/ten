@@ -1,14 +1,14 @@
 # Copyright 2023 Luke Hoban
 
 import unittest
-from src.ten import parse, onnx_wip
+from ten import parse, onnx_wip
 import numpy as np
 import onnxruntime as ort
 import onnx.printer as onnx_printer
 import onnx.shape_inference as onnx_shape_inference
 from test import baseline
 
-
+    
 class OnnxCompilerTestCase(unittest.TestCase):
     def test_linear(self):
         p = parse.Parser(
