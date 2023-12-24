@@ -4,7 +4,7 @@ import unittest
 from ten import tenast, parse, compiler
 import numpy as np
 from typing import Union, Sequence, Optional, Any
-import baseline
+from . import baseline
 
 gpt2_example = """
 Gelu(x: {...}) -> {...}:
