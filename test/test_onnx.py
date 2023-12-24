@@ -52,7 +52,7 @@ class OnnxCompilerTestCase(unittest.TestCase):
         model = compiler.compile_program(decls, gelu_decl, static_args, params)
         print(onnx_printer.to_text(model))
         ort_sess = ort.InferenceSession(model.SerializeToString())
-        for (x, y) in [(-1, -0.156408), (0.0, 0.0), (1.0, 0.843592), (2.0, 1.96059)]:
+        for x, y in [(-1, -0.156408), (0.0, 0.0), (1.0, 0.843592), (2.0, 1.96059)]:
             outputs = ort_sess.run(
                 None,
                 {"x": np.full([], x).astype(np.float32)},

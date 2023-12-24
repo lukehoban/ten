@@ -144,7 +144,7 @@ class CompilerTestCase(unittest.TestCase):
             (([["...", 3]], ["...", 1]), [["...", 4, 3]], ["...", 4, 1]),  # Max
             (([["...", 3]], ["...", 3]), [["...", 3]], ["...", 3]),  # SoftMax
         ]
-        for ((a, b), c, tr) in test_cases:
+        for (a, b), c, tr in test_cases:
             a = [tensor_type(x) for x in a]
             b = tensor_type(b)
             c = [tensor_type(x) for x in c]
@@ -177,7 +177,7 @@ class CompilerTestCase(unittest.TestCase):
             ((["...", 4], ["...", 3, 1]), None),
             # ((["...", 4], [1, 1]), ["...", 4]), # TODO: Is this legit?  The zero-d expansion of ... is invalid
         ]
-        for ((a, b), tr) in test_cases:
+        for (a, b), tr in test_cases:
             a = tensor_type(a)
             b = tensor_type(b)
             if tr is None:
@@ -1239,7 +1239,7 @@ class InterpreterTestCase(unittest.TestCase):
         exp = lambda *static_args: lambda *args: np.exp(args[0])
         max = lambda *static_args: lambda *args: np.max(args[0], axis=-1, keepdims=True)
         sum = lambda *static_args: lambda *args: np.sum(args[0], axis=-1, keepdims=True)
-        for (arr, expected) in [
+        for arr, expected in [
             (
                 np.array([-1.0, 0.0, 1.0]),
                 np.array([0.09003057, 0.24472847, 0.66524096]),
@@ -1266,7 +1266,7 @@ class InterpreterTestCase(unittest.TestCase):
                     "Sum": compiler.Func(sum),
                 }
             )
-            for (k, f) in c.funcs.items():
+            for k, f in c.funcs.items():
                 vars[k] = compiler.Func(f)
             ret = i.eval_call_expr(
                 softmax_decl,
