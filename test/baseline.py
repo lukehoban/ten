@@ -1,6 +1,9 @@
 # From https://github.com/jaymody/picoGPT
 
+import os
+import requests
 import numpy as np
+from tqdm import tqdm
 
 
 def gelu(x):
@@ -110,6 +113,9 @@ import re
 
 
 def load_gpt2_params_from_tf_ckpt(tf_ckpt_path, hparams):
+
+    download_gpt2_model()
+
     def set_in_nested_dict(d, keys, val):
         if not keys:
             return val
@@ -138,3 +144,39 @@ def load_gpt2_params_from_tf_ckpt(tf_ckpt_path, hparams):
             set_in_nested_dict(params, name.split("/"), array)
 
     return params
+
+
+def download_gpt2_model():
+    subdir = os.path.join("model", "gpt2")
+    if os.path.exists(subdir):
+        return
+    os.makedirs(subdir)
+    subdir = subdir.replace("\\", "/")  # needed for Windows
+
+    for filename in [
+        "checkpoint",
+        "encoder.json",
+        "hparams.json",
+        "model.ckpt.data-00000-of-00001",
+        "model.ckpt.index",
+        "model.ckpt.meta",
+        "vocab.bpe",
+    ]:
+        r = requests.get(
+            "https://openaipublic.blob.core.windows.net/gpt-2/"
+            + subdir
+            + "/"
+            + filename,
+            stream=True,
+        )
+
+        with open(os.path.join(subdir, filename), "wb") as f:
+            file_size = int(r.headers["content-length"])
+            chunk_size = 1000
+            with tqdm(
+                ncols=100, desc="Fetching " + filename, total=file_size, unit_scale=True
+            ) as pbar:
+                # 1k for chunk_size, since Ethernet packet size is around 1500 bytes
+                for chunk in r.iter_content(chunk_size=chunk_size):
+                    f.write(chunk)
+                    pbar.update(chunk_size)
