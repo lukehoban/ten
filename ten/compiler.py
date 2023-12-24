@@ -1,5 +1,7 @@
 # Copyright 2023 Luke Hoban
 
+# A compiler and interpreter for the Ten language that runs via numpy on the CPU.
+
 from dataclasses import dataclass
 from typing import Mapping, Sequence, Optional, Union, Tuple, Dict, Callable
 import numpy as np
@@ -76,6 +78,8 @@ class TypeEnv:
         return None
 
 
+# Compiler type checks the AST and compiles it into a new AST with all
+# static_args and type variables resolved
 class Compiler:
     i = 0
     funcs: Dict[str, FunctionDeclaration] = {}
@@ -93,10 +97,10 @@ class Compiler:
         env = TypeEnv(env, static_vars, {}, {})
         ret_type = self.eval_type(func.ret, env)
         args = [(var, self.eval_type(typ, env)) for (var, typ) in func.args]
-        for (var, typ) in args:
+        for var, typ in args:
             env.vars[var.text] = typ
         params = [(var, self.eval_type(typ, env)) for (var, typ) in func.params]
-        for (var, typ) in params:
+        for var, typ in params:
             env.vars[var.text] = typ
         body = (
             [self.compile_statement(stmt, env, ret_type) for stmt in func.body]
@@ -294,7 +298,7 @@ class Compiler:
                 raise Exception(
                     f"Cannot call function {compiled_func.name.text} with {len(compiled_args)} args, expected {len(compiled_func.args)}"
                 )
-            for ((x, param_type), (y, arg_type)) in zip(
+            for (x, param_type), (y, arg_type) in zip(
                 compiled_func.args, compiled_args
             ):
                 self.check_assignable_from_to(
@@ -308,7 +312,7 @@ class Compiler:
             return (
                 CallExpr(
                     VariableExpr(Token("IDENT", func_name, 0, 0)),
-                    [FloatExpr(a) for a in compiled_static_args], # type: ignore
+                    [FloatExpr(a) for a in compiled_static_args],  # type: ignore
                     expr.param_args,  # TODO: Compiled?
                     [e for (e, _) in compiled_args],
                 ),
@@ -368,7 +372,7 @@ class Compiler:
             raise Exception(f"Cannot reshape {t} from {frm}: dimensions don't match")
         constraints: Dict[str, int] = {}
         compiled_from_dims: Sequence[Union[Token, ReshapeTensorShape]] = []
-        for (from_at_i, t_at_i) in zip(frm.dims, t.dims):
+        for from_at_i, t_at_i in zip(frm.dims, t.dims):
             if isinstance(from_at_i, Token):
                 dim = self.eval_dim(from_at_i, env)
                 if dim.text != t_at_i.text:
@@ -469,7 +473,7 @@ class Compiler:
         if len(f.args) != len(arg_types):
             raise Exception(f"Cannot apply {f.name.text} to {arg_types}")
         dotdotdot_type = None
-        for ((_, param_type), arg_type) in zip(f.args, arg_types):
+        for (_, param_type), arg_type in zip(f.args, arg_types):
             # substitute into ...
             if len(param_type.dims) > 0 and param_type.dims[0].text == "...":
                 param_ending_dims = param_type.dims[1:]
@@ -550,7 +554,7 @@ class Interpreter:
         if isinstance(stmt, LetStatement):
             result = self.eval_expr(stmt.expr, env)
             if isinstance(result, list):
-                for (var, val) in zip(stmt.variables, result):
+                for var, val in zip(stmt.variables, result):
                     env.vars[var.text] = val
             elif len(stmt.variables) == 1:
                 env.vars[stmt.variables[0].text] = result
@@ -560,7 +564,7 @@ class Interpreter:
                         f"Cannot assign non-tensor {result} to multi-variable binding {stmt.variables}"
                     )
                 items = np.split(result, len(stmt.variables))
-                for (var, val) in zip(stmt.variables, items):
+                for var, val in zip(stmt.variables, items):
                     env.vars[var.text] = val[0]
             return None
         if isinstance(stmt, ReturnStatement):
@@ -711,4 +715,3 @@ class Interpreter:
             return self.eval_expr(expr.body, env)
         else:
             raise NotImplementedError(f"Unknown expression type: {expr}")
-

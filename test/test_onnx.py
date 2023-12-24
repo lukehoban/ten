@@ -8,7 +8,7 @@ import onnx.printer as onnx_printer
 import onnx.shape_inference as onnx_shape_inference
 from test import baseline
 
-    
+
 class OnnxCompilerTestCase(unittest.TestCase):
     def test_linear(self):
         p = parse.Parser(
