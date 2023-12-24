@@ -113,7 +113,6 @@ import re
 
 
 def load_gpt2_params_from_tf_ckpt(tf_ckpt_path, hparams):
-
     download_gpt2_model()
 
     def set_in_nested_dict(d, keys, val):
@@ -163,7 +162,7 @@ def download_gpt2_model():
         "vocab.bpe",
     ]:
         r = requests.get(
-            "https://openaipublic.blob.core.windows.net/gpt-2/models/124M/"+ filename,
+            "https://openaipublic.blob.core.windows.net/gpt-2/models/124M/" + filename,
             stream=True,
         )
 
