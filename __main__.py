@@ -1,7 +1,7 @@
 # Copyright 2023 Luke Hoban
 
 import fire
-from ten import parse, compiler, tenast
+from ten import parse, compiler, tenast, interpreter_numpy as interp
 from ten.util import encoder
 from test import baseline
 from typing import Optional, Any, Sequence, Union, Dict
@@ -68,15 +68,15 @@ def main(
                 [float(x) for x in [H, S, E, B, V]],
                 type_env,
             )
-            i = compiler.Interpreter()
+            i = interp.Interpreter()
             ret = i.eval_call_expr(
                 gpt2_compiled,
                 params_arr,
                 [x],
-                compiler.Env(
+                interp.Env(
                     None,
                     {
-                        **{k: compiler.Func(v) for k, v in c.funcs.items()},
+                        **{k: interp.Func(v) for k, v in c.funcs.items()},
                         **built_in_impls,
                     },
                     {k: v.decl() for k, v in built_in_impls.items()},  # type: ignore
@@ -192,35 +192,35 @@ built_ins = {
 }
 
 built_in_impls = {
-    "Exp": compiler.Func(lambda *static_args: lambda *args: np.exp(args[0])),
-    "Sqrt": compiler.Func(lambda *static_args: lambda *args: np.sqrt(args[0])),
-    "Max": compiler.Func(
+    "Exp": interp.Func(lambda *static_args: lambda *args: np.exp(args[0])),
+    "Sqrt": interp.Func(lambda *static_args: lambda *args: np.sqrt(args[0])),
+    "Max": interp.Func(
         lambda *static_args: lambda *args: np.max(args[0], axis=-1, keepdims=True)
     ),
-    "Sum": compiler.Func(
+    "Sum": interp.Func(
         lambda *static_args: lambda *args: np.sum(args[0], axis=-1, keepdims=True)
     ),
-    "Tanh": compiler.Func(lambda *static_args: lambda *args: np.tanh(args[0])),
-    "Tri": compiler.Func(lambda *static_args: lambda *args: np.tri(static_args[0])),
-    "Tri_2": compiler.Func(lambda *static_args: lambda *args: np.tri(static_args[0])),
-    "Tri_3": compiler.Func(lambda *static_args: lambda *args: np.tri(static_args[0])),
-    "Transpose": compiler.Func(
+    "Tanh": interp.Func(lambda *static_args: lambda *args: np.tanh(args[0])),
+    "Tri": interp.Func(lambda *static_args: lambda *args: np.tri(static_args[0])),
+    "Tri_2": interp.Func(lambda *static_args: lambda *args: np.tri(static_args[0])),
+    "Tri_3": interp.Func(lambda *static_args: lambda *args: np.tri(static_args[0])),
+    "Transpose": interp.Func(
         lambda *static_args: lambda *args: np.transpose(
             args[0],
             list(range(len(args[0].shape) - 2))
             + [len(args[0].shape) - 1, len(args[0].shape) - 2],
         )
     ),
-    "Mean": compiler.Func(
+    "Mean": interp.Func(
         lambda *static_args: lambda *args: np.mean(args[0], axis=-1, keepdims=True)
     ),
-    "Var": compiler.Func(
+    "Var": interp.Func(
         lambda *static_args: lambda *args: np.var(args[0], axis=-1, keepdims=True)
     ),
-    "Range": compiler.Func(
+    "Range": interp.Func(
         lambda *static_args: lambda *args: np.arange(static_args[0])
     ),
-    "Range_1": compiler.Func(
+    "Range_1": interp.Func(
         lambda *static_args: lambda *args: np.arange(static_args[0])
     ),
 }
