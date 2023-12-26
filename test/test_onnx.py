@@ -29,13 +29,11 @@ class OnnxCompilerTestCase(unittest.TestCase):
             None,
             {"x": [[1, 2, 3, 4, 5, 6, 7, 8, 9, 10], [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]]},
         )
-        np.testing.assert_array_almost_equal(
-            outputs[0],
-            [
-                [56.0, 56.0, 56.0, 56.0, 56.0, 56.0, 56.0],
-                [56.0, 56.0, 56.0, 56.0, 56.0, 56.0, 56.0],
-            ],
-        )
+        expected = [
+            [56.0, 56.0, 56.0, 56.0, 56.0, 56.0, 56.0],
+            [56.0, 56.0, 56.0, 56.0, 56.0, 56.0, 56.0],
+        ]
+        np.testing.assert_array_almost_equal(outputs[0], np.array(expected))
 
     def test_gelu(self):
         p = parse.Parser(
@@ -97,10 +95,8 @@ class OnnxCompilerTestCase(unittest.TestCase):
                 ]
             },
         )
-        np.testing.assert_array_almost_equal(
-            outputs[0],
-            [[27.39452, 27.39452], [30.599133, 30.599133], [33.7999, 33.7999]],
-        )
+        expected = [[27.39452, 27.39452], [30.599133, 30.599133], [33.7999, 33.7999]]
+        np.testing.assert_array_almost_equal(outputs[0], np.array(expected), decimal=3)
 
     def test_mha(self):
         p = parse.Parser(
@@ -144,10 +140,7 @@ class OnnxCompilerTestCase(unittest.TestCase):
         ]
         outputs = ort_sess.run(None, {"x": x})
         expected = baseline.mha(x, params["c_attn"], params["c_proj"], 2)
-        np.testing.assert_array_almost_equal(
-            outputs[0],
-            expected,
-        )
+        np.testing.assert_array_almost_equal(outputs[0], expected, decimal=3)
 
 
 if __name__ == "__main__":

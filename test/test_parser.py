@@ -4,7 +4,7 @@ import unittest
 from ten import tenast, parse, compiler
 import numpy as np
 from typing import Union, Sequence, Optional, Any
-from . import baseline
+import baseline
 
 gpt2_example = """
 Gelu(x: {...}) -> {...}:
@@ -1117,7 +1117,7 @@ class InterpreterTestCase(unittest.TestCase):
             params = torch.load("test/model/cerebras_gpt/pytorch_model.bin")
         except:
             raise unittest.SkipTest("cerebras_gpt model not found")
-        
+
         params_arr = [
             params["transformer.wte.weight"].numpy(),
             params["transformer.wpe.weight"].numpy(),

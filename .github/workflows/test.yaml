@@ -22,7 +22,7 @@ jobs:
           pip install -r requirements.txt
       - name: Test with pytest
         run: |
-          python3 -m unittest test.test_parser
+          python3 -m unittest discover test
       - name: Lint with black
         run: |
           python -m black . --check
