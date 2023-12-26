@@ -229,7 +229,9 @@ class Parser:
             ret.append(self.parse_param(allow_no_type))
         return ret
 
-    def parse_param(self, allow_no_type=False) -> Tuple[tenast.Token, tenast.TensorType]:
+    def parse_param(
+        self, allow_no_type=False
+    ) -> Tuple[tenast.Token, tenast.TensorType]:
         tok = self.read_ident()
         if allow_no_type and not self.peek_token_is_op(":"):
             return (tok, tenast.TensorType([]))

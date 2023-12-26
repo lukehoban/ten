@@ -4,7 +4,7 @@ import unittest
 from ten import tenast, parse, compiler
 import numpy as np
 from typing import Union, Sequence, Optional, Any
-from . import baseline
+import baseline
 
 gpt2_example = """
 Gelu(x: {...}) -> {...}:
@@ -144,7 +144,7 @@ class CompilerTestCase(unittest.TestCase):
             (([["...", 3]], ["...", 1]), [["...", 4, 3]], ["...", 4, 1]),  # Max
             (([["...", 3]], ["...", 3]), [["...", 3]], ["...", 3]),  # SoftMax
         ]
-        for ((a, b), c, tr) in test_cases:
+        for (a, b), c, tr in test_cases:
             a = [tensor_type(x) for x in a]
             b = tensor_type(b)
             c = [tensor_type(x) for x in c]
@@ -177,7 +177,7 @@ class CompilerTestCase(unittest.TestCase):
             ((["...", 4], ["...", 3, 1]), None),
             # ((["...", 4], [1, 1]), ["...", 4]), # TODO: Is this legit?  The zero-d expansion of ... is invalid
         ]
-        for ((a, b), tr) in test_cases:
+        for (a, b), tr in test_cases:
             a = tensor_type(a)
             b = tensor_type(b)
             if tr is None:
@@ -838,8 +838,12 @@ class InterpreterTestCase(unittest.TestCase):
         ),
         "Tanh": compiler.Func(lambda *static_args: lambda *args: np.tanh(args[0])),
         "Tri": compiler.Func(lambda *static_args: lambda *args: np.tri(static_args[0])),
-        "Tri_2": compiler.Func(lambda *static_args: lambda *args: np.tri(static_args[0])),
-        "Tri_3": compiler.Func(lambda *static_args: lambda *args: np.tri(static_args[0])),
+        "Tri_2": compiler.Func(
+            lambda *static_args: lambda *args: np.tri(static_args[0])
+        ),
+        "Tri_3": compiler.Func(
+            lambda *static_args: lambda *args: np.tri(static_args[0])
+        ),
         "Transpose": compiler.Func(
             lambda *static_args: lambda *args: np.transpose(
                 args[0],
@@ -992,12 +996,18 @@ class InterpreterTestCase(unittest.TestCase):
         else:
             self.assertIsInstance(ret, np.ndarray)
 
-    def gpt2_like(self, hsebv: Sequence[int], params_arr: Any, input: np.ndarray, expected: Sequence[int]):
+    def gpt2_like(
+        self,
+        hsebv: Sequence[int],
+        params_arr: Any,
+        input: np.ndarray,
+        expected: Sequence[int],
+    ):
         i = compiler.Interpreter()
         c = compiler.Compiler()
 
         [_, S, _, _, V] = hsebv
-        
+
         gpt2_decl = c.compile_function(
             self.gpt2_decl,
             [float(x) for x in hsebv],
@@ -1030,7 +1040,7 @@ class InterpreterTestCase(unittest.TestCase):
                     **{k: compiler.Func(v) for k, v in c.funcs.items()},
                     **self.built_in_impls,
                 },
-                {k: v.decl() for k, v in self.built_in_impls.items()}, # type: ignore
+                {k: v.decl() for k, v in self.built_in_impls.items()},  # type: ignore
             ),
         )
         if not isinstance(ret, np.ndarray):
@@ -1039,7 +1049,7 @@ class InterpreterTestCase(unittest.TestCase):
         self.assertEqual(ret.shape, (S, V))
         next_toks = [np.argmax(x) for x in ret]
         print(next_toks)
-        self.assertEqual(next_toks, expected)  
+        self.assertEqual(next_toks, expected)
 
     def test_eval_gpt2(self):
         V = 50257
@@ -1072,7 +1082,7 @@ class InterpreterTestCase(unittest.TestCase):
             ],
             [params["ln_f"]["g"], params["ln_f"]["b"]],
         ]
-        # Alan => , 
+        # Alan => ,
         # Alan Turning => ,
         # Alan Turing theor => ized
         # Alan Turing theorized => that
@@ -1084,8 +1094,15 @@ class InterpreterTestCase(unittest.TestCase):
         # Alan Turing theorized that computers would one day become => the
         # Alan Turing theorized that computers would one day become the => most
         # [",", ",", "ized", " that", " the", " would",  " one", " day", " the", " most"]
-        input = np.array([36235, 39141, 18765, 1143, 326, 9061, 561, 530, 1110, 1716, 262])
-        self.gpt2_like([H,S,E,B,V], params_arr, input, [11, 11, 1143, 326, 262, 714, 307, 1110, 307, 262, 749])
+        input = np.array(
+            [36235, 39141, 18765, 1143, 326, 9061, 561, 530, 1110, 1716, 262]
+        )
+        self.gpt2_like(
+            [H, S, E, B, V],
+            params_arr,
+            input,
+            [11, 11, 1143, 326, 262, 714, 307, 1110, 307, 262, 749],
+        )
 
     def test_eval_cerebras_gpt(self):
         V = 50257
@@ -1095,29 +1112,55 @@ class InterpreterTestCase(unittest.TestCase):
         B = 14
         S = 11
         import torch
-        params = torch.load("test/model/cerebras_gpt/pytorch_model.bin")
+
+        try:
+            params = torch.load("test/model/cerebras_gpt/pytorch_model.bin")
+        except:
+            raise unittest.SkipTest("cerebras_gpt model not found")
+
         params_arr = [
             params["transformer.wte.weight"].numpy(),
             params["transformer.wpe.weight"].numpy(),
             [
                 [
                     [
-                        [params[f"transformer.h.{i}.mlp.c_fc.weight"].numpy(), params[f"transformer.h.{i}.mlp.c_fc.bias"].numpy()],
-                        [params[f"transformer.h.{i}.mlp.c_proj.weight"].numpy(), params[f"transformer.h.{i}.mlp.c_proj.bias"].numpy()],
+                        [
+                            params[f"transformer.h.{i}.mlp.c_fc.weight"].numpy(),
+                            params[f"transformer.h.{i}.mlp.c_fc.bias"].numpy(),
+                        ],
+                        [
+                            params[f"transformer.h.{i}.mlp.c_proj.weight"].numpy(),
+                            params[f"transformer.h.{i}.mlp.c_proj.bias"].numpy(),
+                        ],
                     ],
                     [
-                        [params[f"transformer.h.{i}.attn.c_attn.weight"].numpy(), params[f"transformer.h.{i}.attn.c_attn.bias"].numpy()],
-                        [params[f"transformer.h.{i}.attn.c_proj.weight"].numpy(), params[f"transformer.h.{i}.attn.c_proj.bias"].numpy()],
+                        [
+                            params[f"transformer.h.{i}.attn.c_attn.weight"].numpy(),
+                            params[f"transformer.h.{i}.attn.c_attn.bias"].numpy(),
+                        ],
+                        [
+                            params[f"transformer.h.{i}.attn.c_proj.weight"].numpy(),
+                            params[f"transformer.h.{i}.attn.c_proj.bias"].numpy(),
+                        ],
                     ],
-                    [params[f"transformer.h.{i}.ln_1.weight"].numpy(), params[f"transformer.h.{i}.ln_1.bias"].numpy()],
-                    [params[f"transformer.h.{i}.ln_2.weight"].numpy(), params[f"transformer.h.{i}.ln_2.bias"].numpy()],
+                    [
+                        params[f"transformer.h.{i}.ln_1.weight"].numpy(),
+                        params[f"transformer.h.{i}.ln_1.bias"].numpy(),
+                    ],
+                    [
+                        params[f"transformer.h.{i}.ln_2.weight"].numpy(),
+                        params[f"transformer.h.{i}.ln_2.bias"].numpy(),
+                    ],
                 ]
                 for i in range(0, B)
             ],
-            [params["transformer.ln_f.weight"].numpy(), params["transformer.ln_f.bias"].numpy()],
+            [
+                params["transformer.ln_f.weight"].numpy(),
+                params["transformer.ln_f.bias"].numpy(),
+            ],
         ]
-        
-        # Alan => , 
+
+        # Alan => ,
         # Alan Turning => ,
         # Alan Turing theor => izes
         # Alan Turing theorized => that
@@ -1128,8 +1171,15 @@ class InterpreterTestCase(unittest.TestCase):
         # Alan Turing theorized that computers would one day => be
         # Alan Turing theorized that computers would one day become => "
         # Alan Turing theorized that computers would one day become the => "
-        input = np.array([36235, 39141, 18765, 1143, 326, 9061, 561, 530, 1110, 1716, 262])
-        self.gpt2_like([H,S,E,B,V], params_arr, input, [11, 11, 4340, 326, 262, 389, 307, 1110, 307, 366, 366])
+        input = np.array(
+            [36235, 39141, 18765, 1143, 326, 9061, 561, 530, 1110, 1716, 262]
+        )
+        self.gpt2_like(
+            [H, S, E, B, V],
+            params_arr,
+            input,
+            [11, 11, 4340, 326, 262, 389, 307, 1110, 307, 366, 366],
+        )
 
     def test_eval_call_mha(self):
         i = compiler.Interpreter()
@@ -1177,7 +1227,7 @@ class InterpreterTestCase(unittest.TestCase):
                     **{k: compiler.Func(v) for k, v in c.funcs.items()},
                     **self.built_in_impls,
                 },
-                {k: v.decl() for k, v in self.built_in_impls.items()}, # type: ignore
+                {k: v.decl() for k, v in self.built_in_impls.items()},  # type: ignore
             ),
         )
         # expected = expected = self.gelu(x @ w1 + b1) @ w2 + b2
@@ -1193,7 +1243,7 @@ class InterpreterTestCase(unittest.TestCase):
         exp = lambda *static_args: lambda *args: np.exp(args[0])
         max = lambda *static_args: lambda *args: np.max(args[0], axis=-1, keepdims=True)
         sum = lambda *static_args: lambda *args: np.sum(args[0], axis=-1, keepdims=True)
-        for (arr, expected) in [
+        for arr, expected in [
             (
                 np.array([-1.0, 0.0, 1.0]),
                 np.array([0.09003057, 0.24472847, 0.66524096]),
@@ -1220,7 +1270,7 @@ class InterpreterTestCase(unittest.TestCase):
                     "Sum": compiler.Func(sum),
                 }
             )
-            for (k, f) in c.funcs.items():
+            for k, f in c.funcs.items():
                 vars[k] = compiler.Func(f)
             ret = i.eval_call_expr(
                 softmax_decl,

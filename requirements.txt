@@ -3,6 +3,7 @@ torch
 onnxruntime
 numpy
 einops
-tensorflow-macos
+tensorflow
+tqdm
 fire==0.5.0
 regex==2017.4.5
