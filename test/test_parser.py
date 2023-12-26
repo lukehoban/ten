@@ -1113,7 +1113,11 @@ class InterpreterTestCase(unittest.TestCase):
         S = 11
         import torch
 
-        params = torch.load("test/model/cerebras_gpt/pytorch_model.bin")
+        try:
+            params = torch.load("test/model/cerebras_gpt/pytorch_model.bin")
+        except:
+            raise unittest.SkipTest("cerebras_gpt model not found")
+        
         params_arr = [
             params["transformer.wte.weight"].numpy(),
             params["transformer.wpe.weight"].numpy(),
