@@ -1,9 +1,0 @@
-onnx
-torch
-onnxruntime
-numpy
-einops
-tensorflow
-tqdm
-fire==0.5.0
-regex==2017.4.5

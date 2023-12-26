@@ -217,9 +217,7 @@ built_in_impls = {
     "Var": interp.Func(
         lambda *static_args: lambda *args: np.var(args[0], axis=-1, keepdims=True)
     ),
-    "Range": interp.Func(
-        lambda *static_args: lambda *args: np.arange(static_args[0])
-    ),
+    "Range": interp.Func(lambda *static_args: lambda *args: np.arange(static_args[0])),
     "Range_1": interp.Func(
         lambda *static_args: lambda *args: np.arange(static_args[0])
     ),
