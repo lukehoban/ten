@@ -1,0 +1,15 @@
+[project]
+name =  "ten"
+version = "0.1.0"
+dependencies = [
+  "onnx",
+  "torch",
+  "onnxruntime",
+  "numpy",
+  "einops",
+  "tensorflow; sys_platform == 'linux'",
+  "tensorflow-macos; sys_platform == 'darwin'",
+  "tqdm",
+  "fire==0.5.0",
+  "regex==2017.4.5",
+]

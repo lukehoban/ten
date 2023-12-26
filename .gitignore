@@ -3,3 +3,4 @@ venv
 misc
 test/model
 .mypy_cache
+*.egg-info
