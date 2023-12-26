@@ -112,8 +112,7 @@ Design questions:
 Run tests:
 
 ```shell
-$ python3 -m unittest test.test_parser
-$ python3 -m unittest test.test_onnx # Not fully functional
+$ python3 -m unittest discover test
 ```
 
 Run the CLI (requires putting the GPT2 checkpoint model checkpoints in `test/model/gpt2`):
