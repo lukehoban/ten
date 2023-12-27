@@ -79,7 +79,7 @@ class TypeEnv:
 class Compiler:
     """
     Compiler type checks the AST and compiles it into a new AST with all
-    static_args and type variables resolved.  
+    static_args and type variables resolved.
 
     The following transformations are performed:
     - All static_args are resolved

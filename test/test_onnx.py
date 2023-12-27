@@ -110,11 +110,11 @@ class OnnxCompilerTestCase(unittest.TestCase):
 
             Attention[Q,K,N,V](q:{...,Q,K}, k:{...,N,K}, v:{...,N,V}, mask:{Q,N}) -> {...,Q,V}:
                 return SoftMax[N](q @ Transpose[N,K](k) / Sqrt(K) + mask) @ v
-            
+
             MHA[H,S,E,K]|c_attn, c_proj|(x:{S,E}) -> {S,E}:
                 q, k, v = Linear[E,E*3]|c_attn|(x) {S,(3,H,K) -> 3,H,S,K}
                 causal_mask = (Tri[S]() - 1) * 1e10
-                out = Attention[S,K,S,K](q, k, v, causal_mask) {H,S,K -> S,(H,K)}   
+                out = Attention[S,K,S,K](q, k, v, causal_mask) {H,S,K -> S,(H,K)}
                 return Linear[E,E]|c_proj|(out)
             """
         )
@@ -172,7 +172,7 @@ class OnnxCompilerTestCase(unittest.TestCase):
             MHA[H,S,E,K]|c_attn, c_proj|(x:{S,E}) -> {S,E}:
                 q, k, v = Linear[E,E*3]|c_attn|(x) {S,(3,H,K) -> 3,H,S,K}
                 causal_mask = (Tri[S]() - 1) * 1e10
-                out = Attention[S,K,S,K](q, k, v, causal_mask) {H,S,K -> S,(H,K)}   
+                out = Attention[S,K,S,K](q, k, v, causal_mask) {H,S,K -> S,(H,K)}
                 return Linear[E,E]|c_proj|(out)
 
             Transformer[H,S,E]|mlp, attn, ln_1, ln_2|(x:{S,E}) -> {S, E}:
