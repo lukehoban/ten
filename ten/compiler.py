@@ -76,9 +76,20 @@ class TypeEnv:
         return None
 
 
-# Compiler type checks the AST and compiles it into a new AST with all
-# static_args and type variables resolved
 class Compiler:
+    """
+    Compiler type checks the AST and compiles it into a new AST with all
+    static_args and type variables resolved.  
+
+    The following transformations are performed:
+    - All static_args are resolved
+    - All type variables are resolved
+    - All types are made explicit
+    - All type errors are caught
+    - All functions are templated out based on static args (there can be multiple copies of a function with different static args)
+    - For expressions are compiled into a sequence of let statements
+    """
+
     i = 0
     funcs: Dict[str, FunctionDeclaration] = {}
 

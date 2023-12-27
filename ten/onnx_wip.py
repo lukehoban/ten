@@ -337,11 +337,40 @@ class Compiler:
                             perm=[0, 2, 1],
                         )
                     )
-                else:
-                    # Allow calling any built-in operator
-                    # TODO: Move these into standard library functions with type signatures and
-                    # wrappers over the ONNX operators
-                    # TODO: Do we handle static_args as attributes (or params?)
+                elif expr.f.name.text in ["Mean", "Max", "Min"]:
+                    nodes.append(
+                        onnxmod.make_node(
+                            "Reduce" + expr.f.name.text,
+                            inputs=args,
+                            outputs=[output],
+                            axes=[-1],
+                            keepdims=1,
+                        )
+                    )
+                elif expr.f.name.text in ["Sum"]:
+                    last_dim = self.make_temp()
+                    nodes.append(
+                        onnxmod.make_node(
+                            "Constant",
+                            inputs=[],
+                            outputs=[last_dim],
+                            value=onnxmod.make_tensor(
+                                name=output,
+                                data_type=onnx.TensorProto.INT64,
+                                dims=[1],
+                                vals=[-1],
+                            ),
+                        )
+                    )
+                    nodes.append(
+                        onnxmod.make_node(
+                            "Reduce" + expr.f.name.text,
+                            inputs=[args[0], last_dim],
+                            outputs=[output],
+                            keepdims=1,
+                        )
+                    )
+                elif expr.f.name.text in ["Sqrt", "Exp", "Tanh"]:
                     nodes.append(
                         onnxmod.make_node(
                             expr.f.name.text,
@@ -350,6 +379,13 @@ class Compiler:
                             outputs=[output],
                         )
                     )
+                else:
+                    # Allow calling any built-in operator
+                    # TODO: Move these into standard library functions with type signatures and
+                    # wrappers over the ONNX operators
+                    # TODO: Do we handle static_args as attributes (or params?)
+                    raise NotImplementedError(f"Unknown function: {expr.f.name.text}")
+
         elif isinstance(expr, ReshapeExpr):
             t1 = self.compile_expr(
                 expr.expr, static_env, param_env, env, nodes, initializers
@@ -484,6 +520,8 @@ class Compiler:
                 return t1 * t2
             elif expr.op.text == "**":
                 return t1**t2
+            elif expr.op.text == "/":
+                return t1 / t2
             else:
                 raise NotImplementedError(f"BinaryExpr: {expr.op.text}")
         elif isinstance(expr, VariableExpr):
