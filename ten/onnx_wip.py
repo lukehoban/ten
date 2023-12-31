@@ -11,6 +11,7 @@ from .tenast import (
     FloatExpr,
     FunctionDeclaration,
     ReshapeExpr,
+    IndexExpr,
     TensorType,
     Token,
     ReturnStatement,
@@ -385,7 +386,6 @@ class Compiler:
                     # wrappers over the ONNX operators
                     # TODO: Do we handle static_args as attributes (or params?)
                     raise NotImplementedError(f"Unknown function: {expr.f.name.text}")
-
         elif isinstance(expr, ReshapeExpr):
             t1 = self.compile_expr(
                 expr.expr, static_env, param_env, env, nodes, initializers
@@ -503,6 +503,29 @@ class Compiler:
                 onnxmod.make_node(
                     "Reshape",
                     inputs=[transposed_name, output_dims_name],
+                    outputs=[output],
+                )
+            )
+        elif isinstance(expr, IndexExpr):
+            receiver = self.compile_expr(
+                expr.expr, static_env, param_env, env, nodes, initializers
+            )
+            index = self.compile_expr(
+                expr.index, static_env, param_env, env, nodes, initializers
+            )
+            int_index = self.make_temp()
+            nodes.append(
+                onnxmod.make_node(
+                    "Cast",
+                    inputs=[index],
+                    outputs=[int_index],
+                    to=onnx.TensorProto.INT64,
+                )
+            )
+            nodes.append(
+                onnxmod.make_node(
+                    "Gather",
+                    inputs=[receiver, int_index],
                     outputs=[output],
                 )
             )
