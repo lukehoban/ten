@@ -88,7 +88,7 @@ def transformer_block(
 
 
 def gpt2(inputs, wte, wpe, blocks, ln_f, n_head):  # [n_seq] -> [n_seq, n_vocab]
-    # print(inputs, wte.shape, wpe.shape)
+    print(inputs, wte.shape, wpe.shape)
     # token + positional embeddings
     x = wte[inputs] + wpe[range(len(inputs))]  # [n_seq] -> [n_seq, n_embd]
     # print(x.shape)
