@@ -398,9 +398,9 @@ class Compiler:
                     constraints[from_at_i.text] = int(float(dim.text))
             elif isinstance(from_at_i, ReshapeTensorShape):
                 d = int(float(t_at_i.text))
-                compiled_from_inner_dims: Sequence[
-                    Union[Token, ReshapeTensorShape]
-                ] = []
+                compiled_from_inner_dims: Sequence[Union[Token, ReshapeTensorShape]] = (
+                    []
+                )
                 for from_d in from_at_i.dims:
                     if isinstance(from_d, Token):
                         dim = self.eval_dim(from_d, env)
