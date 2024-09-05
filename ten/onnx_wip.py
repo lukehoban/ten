@@ -570,34 +570,3 @@ class Compiler:
             return int(static_args[dim.text])
         else:
             raise NotImplementedError("Unknown dimension type")
-
-
-def make_graph_linear() -> onnx.ModelProto:
-    N = 10
-    K = 7
-    DotDotDot = ["A", "B"]
-
-    # Inputs and Outputs
-    x = onnxmod.make_tensor_value_info("X", onnx.TensorProto.FLOAT, DotDotDot + [N])
-    ret = onnxmod.make_tensor_value_info("Ret", onnx.TensorProto.FLOAT, DotDotDot + [K])
-
-    # Constants
-    wnp = np.random.randn(N, K).astype(np.float32)
-    w = onnxmod.make_tensor("W", onnx.TensorProto.FLOAT, [N, K], wnp)
-    bnp = np.random.randn(K).astype(np.float32)
-    b = onnxmod.make_tensor("B", onnx.TensorProto.FLOAT, [K], bnp)
-
-    # Nodes
-    t1 = onnxmod.make_node("MatMul", ["X", "W"], ["T1"])
-    t2 = onnxmod.make_node("Add", ["T1", "B"], ["Ret"])
-
-    graph = onnxmod.make_graph(
-        name="test",
-        inputs=[x],
-        outputs=[ret],
-        initializer=[w, b],
-        nodes=[t1, t2],
-    )
-
-    model = onnxmod.make_model(graph, producer_name="tensorlang")
-    return model
