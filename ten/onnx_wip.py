@@ -50,13 +50,13 @@ class Compiler:
 
     def compile_program(
         self,
-        program: Sequence[FunctionDeclaration],
+        decls: Mapping[str, FunctionDeclaration],
         entry: FunctionDeclaration,
         static_args: Mapping[str, float],
         params: Mapping[str, ParamsValue],
     ) -> onnx.ModelProto:
-        for func in program:
-            self.funcs[func.name.text] = func
+        for name, func in decls.items():
+            self.funcs[name] = func
         graph = self.compile_entry_function(entry, static_args, params)
         model = onnxmod.make_model(graph, producer_name="ten")
         model.opset_import[0].version = 13
@@ -272,7 +272,10 @@ class Compiler:
                 )
             if not isinstance(expr.f, VariableExpr):
                 raise NotImplementedError("non-variable function call")
-            if expr.f.name.text in self.funcs:
+            if (
+                expr.f.name.text in self.funcs
+                and self.funcs[expr.f.name.text].body is not None
+            ):
                 decl = self.funcs[expr.f.name.text]
                 if len(decl.static_args) != len(static_args):
                     raise NotImplementedError("Wrong number of static args")
@@ -304,8 +307,9 @@ class Compiler:
                     output,
                 )
             else:
+                builtin_name = expr.f.name.text.split("_")[0]
                 # Call a built-in
-                if expr.f.name.text == "Tri":
+                if builtin_name == "Tri":
                     if len(static_args) != 1:
                         raise RuntimeError(
                             "Expected a single static arg N for the dimension of the square lower triangular matrix for Tri"
@@ -324,7 +328,7 @@ class Compiler:
                             ),
                         )
                     )
-                elif expr.f.name.text == "Transpose":
+                elif builtin_name == "Transpose":
                     if len(static_args) != 2:
                         raise RuntimeError(
                             "Expected two static args N, K for Transpose"
@@ -338,17 +342,17 @@ class Compiler:
                             perm=[0, 2, 1],
                         )
                     )
-                elif expr.f.name.text in ["Mean", "Max", "Min"]:
+                elif builtin_name in ["Mean", "Max", "Min"]:
                     nodes.append(
                         onnxmod.make_node(
-                            "Reduce" + expr.f.name.text,
+                            "Reduce" + builtin_name,
                             inputs=args,
                             outputs=[output],
                             axes=[-1],
                             keepdims=1,
                         )
                     )
-                elif expr.f.name.text in ["Sum"]:
+                elif builtin_name in ["Sum"]:
                     last_dim = self.make_temp()
                     nodes.append(
                         onnxmod.make_node(
@@ -365,22 +369,22 @@ class Compiler:
                     )
                     nodes.append(
                         onnxmod.make_node(
-                            "Reduce" + expr.f.name.text,
+                            "Reduce" + builtin_name,
                             inputs=[args[0], last_dim],
                             outputs=[output],
                             keepdims=1,
                         )
                     )
-                elif expr.f.name.text in ["Sqrt", "Exp", "Tanh"]:
+                elif builtin_name in ["Sqrt", "Exp", "Tanh"]:
                     nodes.append(
                         onnxmod.make_node(
-                            expr.f.name.text,
+                            builtin_name,
                             inputs=args,
                             # TODO - destructuring outputs
                             outputs=[output],
                         )
                     )
-                elif expr.f.name.text in ["Range"]:
+                elif builtin_name in ["Range"]:
                     if len(static_args) != 1:
                         raise RuntimeError(
                             "Expected a single static arg N for the dimension of the range for Range"
@@ -439,7 +443,7 @@ class Compiler:
                     # TODO: Move these into standard library functions with type signatures and
                     # wrappers over the ONNX operators
                     # TODO: Do we handle static_args as attributes (or params?)
-                    raise NotImplementedError(f"Unknown function: {expr.f.name.text}")
+                    raise NotImplementedError(f"Unknown function: {builtin_name}")
         elif isinstance(expr, ReshapeExpr):
             t1 = self.compile_expr(
                 expr.expr, static_env, param_env, env, nodes, initializers
