@@ -305,6 +305,20 @@ class OnnxCompilerTestCase(unittest.TestCase):
         print(outputs)
         np.testing.assert_array_almost_equal(outputs[0], expected, decimal=3)
 
+    def test_range(self):
+        p = """
+        R[S]() -> {S}:
+            return Range[S]()
+        """
+        static_args = {"S": 2}
+        params = {}
+        inputs = {}
+        outputs = self.compile_and_run(p, static_args, params, inputs)
+        expected = np.arange(2).astype(np.float32)
+        print(expected)
+        print(outputs)
+        np.testing.assert_array_almost_equal(outputs[0], expected, decimal=3)
+
     def compile_and_run(
         self, program: str, static_args: dict, params: dict, inputs: dict
     ):

@@ -380,6 +380,60 @@ class Compiler:
                             outputs=[output],
                         )
                     )
+                elif expr.f.name.text in ["Range"]:
+                    if len(static_args) != 1:
+                        raise RuntimeError(
+                            "Expected a single static arg N for the dimension of the range for Range"
+                        )
+                    zero = self.make_temp()
+                    nodes.append(
+                        onnxmod.make_node(
+                            "Constant",
+                            inputs=[],
+                            outputs=[zero],
+                            value=onnxmod.make_tensor(
+                                name=output + "_zero",
+                                data_type=onnx.TensorProto.FLOAT,
+                                dims=[],
+                                vals=[0],
+                            ),
+                        )
+                    )
+                    one = self.make_temp()
+                    nodes.append(
+                        onnxmod.make_node(
+                            "Constant",
+                            inputs=[],
+                            outputs=[one],
+                            value=onnxmod.make_tensor(
+                                name=output + "_one",
+                                data_type=onnx.TensorProto.FLOAT,
+                                dims=[],
+                                vals=[1],
+                            ),
+                        )
+                    )
+                    n = self.make_temp()
+                    nodes.append(
+                        onnxmod.make_node(
+                            "Constant",
+                            inputs=[],
+                            outputs=[n],
+                            value=onnxmod.make_tensor(
+                                name=output + "_n",
+                                data_type=onnx.TensorProto.FLOAT,
+                                dims=[],
+                                vals=[int(static_args[0])],
+                            ),
+                        )
+                    )
+                    nodes.append(
+                        onnxmod.make_node(
+                            "Range",
+                            inputs=[zero, n, one],
+                            outputs=[output],
+                        )
+                    )
                 else:
                     # Allow calling any built-in operator
                     # TODO: Move these into standard library functions with type signatures and
