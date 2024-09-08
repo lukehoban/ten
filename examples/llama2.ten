@@ -1,0 +1,51 @@
+RMSNorm[N]|w:{N}|(x: {...,N}) -> {...,N}:
+    return w * x / Sqrt(Mean(x**2) + 1e-5)
+
+Silu(x: {...}) -> {...}:
+    return x / (1 + Exp(-x))
+
+SoftMax[N](x: {...,N}) -> {...,N}:
+    exp_x = Exp(x - Max(x))
+    return exp_x / Sum(exp_x)
+
+Linear[N,K]|w:{N,K},b:{K}|(x:{...,N}) -> {...,K}:
+    return x@w + b
+
+FeedForward[S,E]|w1, w2, w3|(x:{S,E}) -> {S,E}:
+    a = Silu(Linear[E,E*4]|w1|(x)) * Linear[E,E*4]|w3|(x)
+    return Linear[E*4,E]|w2|(a)
+
+Attention[Q,K,N,V](q:{...,Q,K}, k:{...,N,K}, v:{...,N,V}, mask:{Q,N}) -> {...,Q,V}:
+    return SoftMax[N](q @ Transpose[N,K](k) / Sqrt(K) + mask) @ v
+
+Rotary[S,H,K](q:{S,H,K}, k{S,H,K}) -> {2,S,H,K}:
+    freqs := 1.0 / (10000 ** (Range[0,K,2]()) / K)
+    t := Range[0,S,1]()
+    freqst := Outer(freqs,t)
+    freqs_cos := Cos(freqst)
+    freqs_sin := Sin(freqst)
+    qr,qi = q {S,H,(K,2) -> 2,S,H,K}
+    kr,ki = k {S,H,(K,2) -> 2,S,H,K}
+    qor = qr * freqs_cos - qi * freqs_sin
+    qoi = qr * freqs_sin + qi * freqs_cos
+    kor = kr * freqs_cos - ki * freqs_sin
+    koi = kr * freqs_sin + ki * freqs_cos
+    return Flatten(Stack(qor, qoi))
+
+GQA[H,S,E,K]|wq,wk,wv,wo|(x:{S,E}) -> {S,E}:
+    q1 = Linear[E,E]|wq|(x) {S,(H,K) -> S,H,K}
+    k1 = Linear[E,E]|wk|(x) {S,(H,K) -> S,H,K}
+    v = Linear[E,E]|wv|(x) {S,(H,K) -> S,H,K}
+    q, k = Rotary(q1, k1)
+    causal_mask = (Tri[S]() - 1) * 1e10
+    out = Attention[S,K,S,K](q, k, v, causal_mask) {H,S,K -> S,(H,K)}   
+    return Linear[E,E]|c_proj|(out)
+
+Transformer[H,S,E]|feedforward, attention, attention_norm, ffn_norm|(x:{S,E}) -> {S, E}:
+    y = x + GQA[H,S,E,E/H]|attention|(RMSNorm[S,E]|attention_norm|(x))
+    return y + FeedForward[S,E]|feedforward|(RMSNorm[S,E]|ffn_norm|(y))
+
+Llama2[H,S,E,B,V]|wte:{V,E}, wpe:{S,E}, blocks, ln_f|(inputs:{S}) -> {S,V}:
+    x = wte.[inputs] + wpe.[Range[S]()]
+    z = for i in 0...B: x, y -> Transformer[H,S,E]|blocks.[i]|(y)
+    return RMSNorm[S,E]|ln_f|(z) @ Transpose[V,E](wte)     
