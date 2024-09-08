@@ -185,9 +185,7 @@ class OnnxCompilerTestCase(unittest.TestCase):
         np.testing.assert_array_almost_equal(outputs[0], expected, decimal=3)
 
     def test_gpt2(self):
-        raise unittest.SkipTest("not fully implemented")
-        p = parse.Parser(
-            """
+        p = """
             Gelu(x: {...}) -> {...}:
                 return 0.5 * x * (1 + Tanh(0.7978845608 * x + 0.044715 * x**3))
 
@@ -221,14 +219,10 @@ class OnnxCompilerTestCase(unittest.TestCase):
                 return y + FFN[S,E]|mlp|(LayerNorm[S,E]|ln_2|(y))
 
             GPT2[H,S,E,B,V]|wte:{V,E}, wpe:{S,E}, blocks, ln_f|(inputs:{S}) -> {S,V}:
-                x = wte.[inputs] + wpe.[Range[S]()]
+                x = wte.[inputs] + wpe
                 z = for i in 0...B: x, y -> Transformer[H,S,E]|blocks.[i]|(y)
                 return LayerNorm[S,E]|ln_f|(z) @ Transpose[V,E](wte)
             """
-        )
-        decls = p.parse_program()
-        decl = decls[-1]
-        compiler = onnx_wip.Compiler()
         H, S, E, B, V = 2, 3, 4, 1, 6
         static_args = {"H": H, "S": S, "E": E, "B": B, "V": V}
         params = {
@@ -259,20 +253,12 @@ class OnnxCompilerTestCase(unittest.TestCase):
                 "b": np.ones([E]),
             },
         }
-
-        model = compiler.compile_program(decls, decl, static_args, params)
-        model = onnx_shape_inference.infer_shapes(
-            model, check_type=True, data_prop=True
-        )
-        print(model.graph.initializer)
-        print(onnx_printer.to_text(model.graph))
-        ort_sess = ort.InferenceSession(model.SerializeToString())
         x = [
             1,
             2,
             3,
         ]
-        outputs = ort_sess.run(None, {"x": x})
+        outputs = self.compile_and_run(p, static_args, params, {"x": x})
         expected = baseline.gpt2(
             x, params["wte"], params["wpe"], params["blocks"], params["ln_f"], 2
         )

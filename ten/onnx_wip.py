@@ -4,11 +4,12 @@ import onnx
 from onnx import helper as onnxmod
 import numpy as np
 from dataclasses import dataclass
-from typing import Mapping, Sequence, Optional, Dict, Union
+from typing import Mapping, Sequence, Optional, Dict, Union, List
 
 from .tenast import (
     CallExpr,
     FloatExpr,
+    ForExpr,
     FunctionDeclaration,
     ReshapeExpr,
     IndexExpr,
@@ -35,7 +36,7 @@ class Env:
         return None
 
 
-ParamsValue = Union[Mapping[str, "ParamsValue"], np.ndarray]
+ParamsValue = Union[Mapping[str, "ParamsValue"], List["ParamsValue"], np.ndarray]
 
 
 class Compiler:
@@ -260,9 +261,7 @@ class Compiler:
                 static_args.append(self.eval_static_expr(arg, static_env))
             param_args: list[ParamsValue] = []
             for arg in expr.param_args:
-                if not isinstance(arg, VariableExpr):
-                    raise NotImplementedError("non-variable param arg")
-                param_args.append(param_env[arg.name.text])
+                param_args.append(self.eval_param_expr(arg, param_env, static_env))
             args: list[str] = []
             for arg in expr.args:
                 args.append(
@@ -287,6 +286,10 @@ class Compiler:
                     if isinstance(param_arg, np.ndarray):
                         raise NotImplementedError(
                             "Attempt to spread a tensor into a params list"
+                        )
+                    if isinstance(param_arg, List):
+                        raise NotImplementedError(
+                            "Attempt to spread a sequence into a params list"
                         )
                     param_args = [param_arg[tok.text] for (tok, _) in decl.params]
                 if len(param_args) != len(decl.params):
@@ -587,6 +590,62 @@ class Compiler:
                     outputs=[output],
                 )
             )
+        elif isinstance(expr, ForExpr):
+            start = self.eval_static_expr(expr.start, static_env)
+            end = self.eval_static_expr(expr.end, static_env)
+            var = expr.var.text
+            index = expr.index.text
+            init = self.compile_expr(
+                expr.init, static_env, param_env, env, nodes, initializers
+            )
+
+            loop_body_nodes: list[onnx.NodeProto] = []
+            body = onnxmod.make_graph(
+                nodes=loop_body_nodes,
+                name="loop_body",
+                inputs=[
+                    onnxmod.make_tensor_value_info(index, onnx.TensorProto.FLOAT, [1]),
+                    onnxmod.make_tensor_value_info("_cond", onnx.TensorProto.BOOL, [1]),
+                    onnxmod.make_tensor_value_info(var, onnx.TensorProto.FLOAT, [1]),
+                ],
+                outputs=[
+                    onnxmod.make_tensor_value_info(
+                        "_cond_o", onnx.TensorProto.FLOAT, [1]
+                    ),
+                    onnxmod.make_tensor_value_info("ret", onnx.TensorProto.FLOAT, [1]),
+                ],
+            )
+            self.compile_expr(
+                expr.loop,
+                static_env,
+                param_env,
+                env,
+                loop_body_nodes,
+                initializers,
+                "ret",
+            )
+            iteration = self.make_temp("n")
+            nodes.append(
+                onnxmod.make_node(
+                    "Constant",
+                    inputs=[],
+                    outputs=[iteration],
+                    value=onnxmod.make_tensor(
+                        name=iteration,
+                        data_type=onnx.TensorProto.INT64,
+                        dims=[],
+                        vals=end-start,
+                    ),
+                )
+            )
+            nodes.append(
+                onnxmod.make_node(
+                    "Loop",
+                    inputs=[iteration, "_unused", init],
+                    outputs=["_unused", output],
+                    body=body,
+                )
+            )
         else:
             raise NotImplementedError(f"Unknown expr type: {type(expr)}")
         return output
@@ -609,6 +668,26 @@ class Compiler:
             return env[expr.name.text]
         elif isinstance(expr, FloatExpr):
             return float(expr.value)
+        else:
+            raise NotImplementedError(f"Unknown expr type: {type(expr)}")
+
+    def eval_param_expr(self, expr: Expr, env: Mapping[str, ParamsValue], static_env: Mapping[str, float]) -> ParamsValue:
+        if isinstance(expr, VariableExpr):
+            res = env.get(expr.name.text)
+            if res is not None:
+                return res
+            res = static_env.get(expr.name.text)
+            if res is None:
+                raise NotImplementedError(f"Unbound variable: {expr.name.text}")
+            return np.array(res)
+        elif isinstance(expr, IndexExpr):
+            receiver = self.eval_param_expr(expr.expr, env, static_env)
+            index = self.eval_static_expr(expr.index, static_env)
+            if isinstance(receiver, np.ndarray):
+                raise NotImplementedError("Indexing into a tensor")
+            elif isinstance(receiver, Mapping):
+                raise NotImplementedError("Indexing into a sequence")
+            return receiver[int(index)]
         else:
             raise NotImplementedError(f"Unknown expr type: {type(expr)}")
 
