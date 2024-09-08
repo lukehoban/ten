@@ -466,9 +466,13 @@ class Compiler:
             left = self.eval_static_expr(expr.left, env)
             right = self.eval_static_expr(expr.right, env)
             if not isinstance(left, float) and not isinstance(left, np.ndarray):
-                raise RuntimeError(f"Cannot '{expr.op.text}' non-tensor {left}.")
+                raise RuntimeError(
+                    f"Cannot '{expr.op.text}' non-tensor {left} of type {type(left)}."
+                )
             if not isinstance(right, float) and not isinstance(right, np.ndarray):
-                raise RuntimeError(f"Cannot '{expr.op.text}' non-tensor {right}.")
+                raise RuntimeError(
+                    f"Cannot '{expr.op.text}' non-tensor {right} of type {type(right)}."
+                )
             if expr.op.text == "+":
                 return left + right
             elif expr.op.text == "-":
